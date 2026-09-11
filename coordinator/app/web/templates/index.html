@@ -3,16 +3,6 @@
 {% block content %}
 
 <div class="card">
-  <h2>Состояние координатора</h2>
-  {% if coordinator_ok %}
-    <span class="pill ok">на связи</span>
-  {% else %}
-    <span class="pill bad">недоступен</span>
-  {% endif %}
-  <span class="muted">&nbsp;{{ coordinator_url }}</span>
-</div>
-
-<div class="card">
   <h2>Задания</h2>
   {% if jobs %}
     <table>
@@ -40,13 +30,13 @@
   {% if workers %}
     <table>
       <thead>
-        <tr><th>Имя</th><th>Хост</th><th>Состояние</th><th>Потоки</th><th>Версия</th></tr>
+        <tr><th>Имя</th><th>Адрес</th><th>Состояние</th><th>Потоки</th><th>Версия</th></tr>
       </thead>
       <tbody>
         {% for w in workers %}
         <tr>
           <td>{{ w.name }}</td>
-          <td>{{ w.host or "—" }}</td>
+          <td>{{ w.agent_url or w.host or "—" }}</td>
           <td><span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span></td>
           <td>{{ w.threads or "—" }}</td>
           <td>{{ w.agent_version or "—" }}</td>

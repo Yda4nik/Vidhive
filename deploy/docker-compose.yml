@@ -16,6 +16,7 @@ services:
       retries: 10
     networks: [vidhive]
 
+  # Coordinator serves both the REST API and the web dashboard (UI at /).
   coordinator:
     build:
       context: ..
@@ -32,18 +33,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks: [vidhive]
-
-  web:
-    build:
-      context: ..
-      dockerfile: web/Dockerfile
-    environment:
-      VIDHIVE_COORDINATOR_URL: http://coordinator:8000
-    depends_on:
-      - coordinator
-    ports:
-      - "8080:8080"
     networks: [vidhive]
 
   agent-01:
