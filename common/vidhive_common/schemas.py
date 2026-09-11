@@ -18,6 +18,8 @@ from vidhive_common.enums import ChunkStatus, ItemStatus, JobState, WorkerState
 # --------------------------------------------------------------------------- #
 class JobCreate(BaseModel):
     name: str | None = None
+    # Optional textual range ("[A,B]", "A", "[A,]", ""); overrides range_start/end.
+    range_spec: str | None = None
     range_start: int = Field(default=0, ge=0)
     range_end: int | None = Field(default=None, ge=0)  # None => open-ended
     chunk_size: int = Field(default=5000, ge=1)
@@ -50,6 +52,8 @@ class JobOut(BaseModel):
 class WorkerRegister(BaseModel):
     name: str
     host: str | None = None
+    # Base URL the coordinator/web use to reach this agent (files, control).
+    agent_url: str | None = None
     agent_version: str | None = None
     threads: int | None = Field(default=None, ge=1)
     storage_path: str | None = None
@@ -59,6 +63,7 @@ class WorkerOut(BaseModel):
     id: int
     name: str
     host: str | None
+    agent_url: str | None
     state: WorkerState
     agent_version: str | None
     threads: int | None

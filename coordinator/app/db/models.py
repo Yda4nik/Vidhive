@@ -75,6 +75,7 @@ class Worker(Base):
     id: Mapped[int] = _pk()
     name: Mapped[str] = mapped_column(String(150), unique=True, nullable=False)
     host: Mapped[str | None] = mapped_column(String(255))
+    agent_url: Mapped[str | None] = mapped_column(String(255))
     state: Mapped[str] = mapped_column(String(20), default="offline", nullable=False)
     agent_version: Mapped[str | None] = mapped_column(String(50))
     threads: Mapped[int | None] = mapped_column(Integer)
@@ -114,6 +115,8 @@ class Job(Base):
     name: Mapped[str | None] = mapped_column(String(255))
     range_start: Mapped[int | None] = mapped_column(BigInteger)
     range_end: Mapped[int | None] = mapped_column(BigInteger)  # NULL => open-ended
+    # Next identifier from which a brand-new chunk will be cut (the chunking cursor).
+    next_chunk_start: Mapped[int | None] = mapped_column(BigInteger)
     state: Mapped[str] = mapped_column(String(20), default="created", nullable=False)
     chunk_size: Mapped[int] = mapped_column(Integer, default=5000, nullable=False)
     request_timeout_seconds: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
