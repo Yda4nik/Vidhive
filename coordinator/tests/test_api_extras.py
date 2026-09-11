@@ -91,6 +91,39 @@ def test_lease_skipped_when_worker_is_low_on_disk(client):
     assert _lease_status(client, wid) == 204
 
 
+def test_retry_requeues_only_failed_items(client):
+    jid = _running_job(client, start=0, end=4, chunk=10)
+    wid = _register(client)
+    lease = _lease(client, wid)
+    client.post(
+        f"/api/workers/{wid}/progress",
+        json={
+            "chunk_id": lease["chunk_id"],
+            "next_id": 5,
+            "items": [
+                {"external_id": 0, "status": "rate_limited"},
+                {"external_id": 1, "status": "completed", "title": "clip"},
+            ],
+        },
+    )
+    client.post(f"/api/workers/{wid}/complete", json={"chunk_id": lease["chunk_id"]})
+    assert client.get(f"/api/jobs/{jid}").json()["state"] == "completed"
+
+    assert client.post(f"/api/jobs/{jid}/retry").json()["requeued"] == 1
+
+    # The job reopened and hands out a single-id chunk for exactly the failed id.
+    again = _lease(client, wid)
+    assert (again["range_start"], again["range_end"]) == (0, 0)
+    # The successful identifier was left alone.
+    done = client.get(f"/api/jobs/{jid}/items", params={"status": "completed"}).json()
+    assert [i["external_id"] for i in done] == [1]
+
+
+def test_retry_is_noop_without_failures(client):
+    jid = _running_job(client)
+    assert client.post(f"/api/jobs/{jid}/retry").json()["requeued"] == 0
+
+
 def _lease_status(client, wid):
     return client.post(
         f"/api/workers/{wid}/lease", json={"worker_id": wid, "lease_seconds": 120}

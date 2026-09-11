@@ -303,6 +303,83 @@ async def complete_chunk(
     return chunk
 
 
+_RETRYABLE = (
+    ItemStatus.FAILED.value,
+    ItemStatus.RETRY_WAIT.value,
+    ItemStatus.RATE_LIMITED.value,
+)
+
+
+async def requeue_failed_items(session: AsyncSession, job_id: int, limit: int = 1000) -> int:
+    """Re-queue identifiers that ended in a transient failure (spec 11.3).
+
+    Each such identifier gets its own single-id chunk, so a retry re-checks only
+    what actually failed and never re-downloads what already succeeded.
+    """
+    job = await session.get(Job, job_id)
+    if job is None:
+        raise LookupError(f"job {job_id} not found")
+
+    items = (
+        await session.execute(
+            select(Item)
+            .where(Item.job_id == job_id)
+            .where(Item.status.in_(_RETRYABLE))
+            .order_by(Item.external_id)
+            .limit(limit)
+        )
+    ).scalars().all()
+    if not items:
+        return 0
+
+    # Single-id chunks that already exist from an earlier retry.
+    existing = {
+        c.range_start: c
+        for c in (
+            await session.execute(
+                select(RangeChunk)
+                .where(RangeChunk.job_id == job_id)
+                .where(RangeChunk.range_start == RangeChunk.range_end)
+            )
+        ).scalars().all()
+    }
+
+    for item in items:
+        chunk = existing.get(item.external_id)
+        if chunk is None:
+            session.add(
+                RangeChunk(
+                    job_id=job_id,
+                    range_start=item.external_id,
+                    range_end=item.external_id,
+                    next_id=item.external_id,
+                    status=ChunkStatus.PENDING.value,
+                )
+            )
+        else:
+            chunk.status = ChunkStatus.PENDING.value
+            chunk.leased_by = None
+            chunk.lease_expires_at = None
+            chunk.next_id = item.external_id
+            chunk.attempt += 1
+        item.status = ItemStatus.PENDING.value
+
+    # A finished job must go back to running, or nothing would be handed out.
+    if job.state != JobState.RUNNING.value:
+        job.state = JobState.RUNNING.value
+
+    log_event(
+        session,
+        component="scheduler",
+        operation="retry",
+        result="requeued",
+        job_id=job_id,
+        message=f"{len(items)} failed identifier(s) re-queued",
+    )
+    await session.flush()
+    return len(items)
+
+
 async def maybe_complete_job(session: AsyncSession, job_id: int) -> bool:
     """Complete a finite job once its range is exhausted and no chunks remain open."""
     job = await session.get(Job, job_id)

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Event, Item, Job, MediaMetadata, Worker
 from app.db.session import get_session
+from app.services import scheduler
 from app.services.events import log_event
 from vidhive_common.enums import JobState
 from vidhive_common.ranges import RangeParseError, parse_range
@@ -125,6 +126,18 @@ async def resume_job(job_id: int, session: AsyncSession = Depends(get_session)) 
 async def stop_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Job:
     job = await _get_job_or_404(session, job_id)
     return await _transition(session, job, "stop", JobState.STOPPED)
+
+
+@router.post("/{job_id}/retry")
+async def retry_failed(job_id: int, session: AsyncSession = Depends(get_session)) -> dict:
+    """Re-queue identifiers that ended in a transient failure."""
+    await _get_job_or_404(session, job_id)
+    try:
+        requeued = await scheduler.requeue_failed_items(session, job_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await session.commit()
+    return {"requeued": requeued}
 
 
 @router.get("/{job_id}/items", response_model=list[ItemOut])

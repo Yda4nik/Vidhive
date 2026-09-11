@@ -37,6 +37,7 @@
                 <form class="inline" method="post" action="/jobs/{{ job.id }}/resume"><button class="btn">▶ продолжить</button></form>
                 <form class="inline" method="post" action="/jobs/{{ job.id }}/stop"><button class="btn">⏹ стоп</button></form>
               {% endif %}
+              <form class="inline" method="post" action="/jobs/{{ job.id }}/retry"><button class="btn">↻ повторить ошибки</button></form>
             </div>
           </td>
         </tr>

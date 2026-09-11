@@ -18,7 +18,14 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.jobs import create_job, pause_job, resume_job, start_job, stop_job
+from app.api.jobs import (
+    create_job,
+    pause_job,
+    resume_job,
+    retry_failed,
+    start_job,
+    stop_job,
+)
 from app.db.models import Item, Job, MediaMetadata, Worker, WorkerMetric
 from app.db.session import get_session
 from vidhive_common.enums import ItemStatus
@@ -37,6 +44,7 @@ _JOB_ACTIONS = {
     "pause": pause_job,
     "resume": resume_job,
     "stop": stop_job,
+    "retry": retry_failed,
 }
 
 
