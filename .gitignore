@@ -57,3 +57,7 @@ Thumbs.db
 
 # ---- Node (docs generator, if used locally) ----
 node_modules/
+
+# ---- Local databases / scratch ----
+*.db
+_verify.db

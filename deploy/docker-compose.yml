@@ -1,0 +1,101 @@
+name: vidhive
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vidhive}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vidhive}
+      POSTGRES_DB: ${POSTGRES_DB:-vidhive}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vidhive}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [vidhive]
+
+  coordinator:
+    build:
+      context: ..
+      dockerfile: coordinator/Dockerfile
+    environment:
+      VIDHIVE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vidhive}:${POSTGRES_PASSWORD:-vidhive}@postgres:5432/${POSTGRES_DB:-vidhive}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [vidhive]
+
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    environment:
+      VIDHIVE_COORDINATOR_URL: http://coordinator:8000
+    depends_on:
+      - coordinator
+    ports:
+      - "8080:8080"
+    networks: [vidhive]
+
+  agent-01:
+    build:
+      context: ..
+      dockerfile: agent/Dockerfile
+    environment:
+      VIDHIVE_COORDINATOR_URL: http://coordinator:8000
+      VIDHIVE_WORKER_NAME: agent-01
+      VIDHIVE_THREADS: "8"
+      VIDHIVE_STORAGE_PATH: /data/videos
+    volumes:
+      - videos-01:/data/videos
+    depends_on:
+      - coordinator
+    networks: [vidhive]
+
+  agent-02:
+    build:
+      context: ..
+      dockerfile: agent/Dockerfile
+    environment:
+      VIDHIVE_COORDINATOR_URL: http://coordinator:8000
+      VIDHIVE_WORKER_NAME: agent-02
+      VIDHIVE_THREADS: "16"
+      VIDHIVE_STORAGE_PATH: /data/videos
+    volumes:
+      - videos-02:/data/videos
+    depends_on:
+      - coordinator
+    networks: [vidhive]
+
+  agent-03:
+    build:
+      context: ..
+      dockerfile: agent/Dockerfile
+    environment:
+      VIDHIVE_COORDINATOR_URL: http://coordinator:8000
+      VIDHIVE_WORKER_NAME: agent-03
+      VIDHIVE_THREADS: "8"
+      VIDHIVE_STORAGE_PATH: /data/videos
+    volumes:
+      - videos-03:/data/videos
+    depends_on:
+      - coordinator
+    networks: [vidhive]
+
+networks:
+  vidhive:
+
+volumes:
+  pgdata:
+  videos-01:
+  videos-02:
+  videos-03:
