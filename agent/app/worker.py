@@ -52,8 +52,22 @@ class WorkerRunner:
     def stop(self) -> None:
         self._stop.set()
 
+    async def _register_with_retry(self) -> None:
+        """Keep trying to register until the coordinator answers (it may still be
+        starting up, applying migrations)."""
+        while not self._stop.is_set():
+            try:
+                await self.register()
+                return
+            except Exception as exc:  # noqa: BLE001
+                log.warning("registration failed, retrying in %ss: %s",
+                            self.settings.poll_interval, exc)
+                await self._sleep(self.settings.poll_interval)
+
     async def run(self) -> None:
-        await self.register()
+        await self._register_with_retry()
+        if self._stop.is_set():
+            return
         hb_task = asyncio.create_task(self._heartbeat_loop())
         try:
             await self._lease_loop()

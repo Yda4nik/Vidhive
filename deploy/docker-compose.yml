@@ -47,7 +47,8 @@ services:
     volumes:
       - videos-01:/data/videos
     depends_on:
-      - coordinator
+      coordinator:
+        condition: service_healthy
     networks: [vidhive]
 
   agent-02:
@@ -62,7 +63,8 @@ services:
     volumes:
       - videos-02:/data/videos
     depends_on:
-      - coordinator
+      coordinator:
+        condition: service_healthy
     networks: [vidhive]
 
   agent-03:
@@ -77,7 +79,8 @@ services:
     volumes:
       - videos-03:/data/videos
     depends_on:
-      - coordinator
+      coordinator:
+        condition: service_healthy
     networks: [vidhive]
 
 networks:
