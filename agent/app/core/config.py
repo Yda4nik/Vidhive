@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     # the queue quickly, while a live one never loses its lease.
     lease_seconds: int = 60
     poll_interval: float = 1.0          # wait between lease attempts when idle
-    heartbeat_interval: float = 15.0
+    # Metrics must reach the UI at least once per 5 seconds (spec 18).
+    heartbeat_interval: float = 5.0
     check_timeout: float = 20.0
     progress_batch: int = 50            # identifiers per progress report / checkpoint
     enable_download: bool = True

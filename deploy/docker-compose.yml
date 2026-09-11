@@ -57,7 +57,9 @@ services:
       VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
       VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-01
-      VIDHIVE_THREADS: "8"
+      # Threads: AGENT_THREADS sets all servers at once, AGENT_0N_THREADS
+      # overrides one (individual wins over global — spec section 4).
+      VIDHIVE_THREADS: ${AGENT_01_THREADS:-${AGENT_THREADS:-34}}
       VIDHIVE_STORAGE_PATH: /data/videos
     volumes:
       - videos-01:/data/videos
@@ -76,7 +78,7 @@ services:
       VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
       VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-02
-      VIDHIVE_THREADS: "16"
+      VIDHIVE_THREADS: ${AGENT_02_THREADS:-${AGENT_THREADS:-33}}
       VIDHIVE_STORAGE_PATH: /data/videos
     volumes:
       - videos-02:/data/videos
@@ -95,7 +97,7 @@ services:
       VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
       VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-03
-      VIDHIVE_THREADS: "8"
+      VIDHIVE_THREADS: ${AGENT_03_THREADS:-${AGENT_THREADS:-33}}
       VIDHIVE_STORAGE_PATH: /data/videos
     volumes:
       - videos-03:/data/videos

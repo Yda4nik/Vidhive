@@ -41,6 +41,46 @@ def test_job_action_pause(client):
     assert "paused" in r.text
 
 
+def test_dashboard_shows_progress_speed_and_active_downloads(client):
+    """Acceptance criterion 10: progress, speed, active downloads, metrics."""
+    job = client.post(
+        "/api/jobs", json={"name": "scan", "range_start": 0, "range_end": 9, "chunk_size": 10}
+    ).json()
+    client.post(f"/api/jobs/{job['id']}/start")
+    wid = client.post("/api/workers/register", json={"name": "agent-01"}).json()["id"]
+    client.post(
+        f"/api/workers/{wid}/heartbeat",
+        json={"cpu_percent": 12.5, "disk_free_gb": 500.0, "active_downloads": 2, "active_checks": 7},
+    )
+    lease = client.post(
+        f"/api/workers/{wid}/lease", json={"worker_id": wid, "lease_seconds": 120}
+    ).json()
+    client.post(
+        f"/api/workers/{wid}/progress",
+        json={
+            "chunk_id": lease["chunk_id"],
+            "next_id": 4,
+            "items": [
+                {"external_id": 0, "status": "completed", "title": "a", "size_bytes": 1024},
+                {"external_id": 1, "status": "not_found"},
+                {"external_id": 2, "status": "not_found"},
+                {"external_id": 3, "status": "forbidden"},
+            ],
+        },
+    )
+
+    body = client.get("/").text
+    assert "4 / 10" in body          # progress against the finite range
+    assert "40.0%" in body
+    assert "ID/с" in body            # processing speed
+    assert ">2<" in body or "2</td>" in body  # active downloads from the heartbeat
+
+    # The fragment that HTMX polls every 5 seconds must render on its own.
+    frag = client.get("/fragments/dashboard")
+    assert frag.status_code == 200
+    assert "4 / 10" in frag.text
+
+
 def test_library_shows_readable_size_for_sub_megabyte_files(client):
     """A 256 KB file must not render as '0 МБ' (integer-MB truncation bug)."""
     job = client.post("/api/jobs", json={"range_start": 5, "range_end": 5, "chunk_size": 1}).json()

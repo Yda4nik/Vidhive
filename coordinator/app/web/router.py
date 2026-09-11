@@ -9,13 +9,14 @@ so seeking works.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.jobs import (
@@ -26,7 +27,7 @@ from app.api.jobs import (
     start_job,
     stop_job,
 )
-from app.db.models import Item, Job, MediaMetadata, Worker, WorkerMetric
+from app.db.models import FileRecord, Item, Job, MediaMetadata, Worker, WorkerMetric
 from app.db.session import get_session
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import JobCreate
@@ -68,11 +69,103 @@ def _page(request: Request, name: str, ctx: dict) -> HTMLResponse:
     return templates.TemplateResponse(request, name, ctx)
 
 
-@router.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request, session: AsyncSession = Depends(get_session)):
+_SPEED_WINDOW_SECONDS = 60
+_DONE_STATUSES = (ItemStatus.COMPLETED.value,)
+_OPEN_STATUSES = (ItemStatus.PENDING.value, ItemStatus.CHECKING.value)
+
+
+async def _dashboard_context(session: AsyncSession) -> dict:
+    """Progress, speed, active downloads and totals (acceptance criterion 10)."""
     jobs = (await session.execute(select(Job).order_by(Job.id.desc()))).scalars().all()
     workers = (await session.execute(select(Worker).order_by(Worker.name))).scalars().all()
-    return _page(request, "index.html", {"jobs": list(jobs), "workers": list(workers)})
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_SPEED_WINDOW_SECONDS)
+    rows = []
+    for job in jobs:
+        processed = (
+            await session.execute(
+                select(func.count())
+                .select_from(Item)
+                .where(Item.job_id == job.id)
+                .where(Item.status.not_in(_OPEN_STATUSES))
+            )
+        ).scalar_one()
+        downloaded = (
+            await session.execute(
+                select(func.count())
+                .select_from(Item)
+                .where(Item.job_id == job.id)
+                .where(Item.status.in_(_DONE_STATUSES))
+            )
+        ).scalar_one()
+        recent = (
+            await session.execute(
+                select(func.count())
+                .select_from(Item)
+                .where(Item.job_id == job.id)
+                .where(Item.checked_at.is_not(None))
+                .where(Item.checked_at >= cutoff)
+            )
+        ).scalar_one()
+
+        total = None
+        if job.range_end is not None and job.range_start is not None:
+            total = job.range_end - job.range_start + 1
+        rows.append(
+            {
+                "job": job,
+                "total": total,
+                "processed": processed,
+                "downloaded": downloaded,
+                "percent": round(processed * 100 / total, 1) if total else None,
+                "speed": round(recent / _SPEED_WINDOW_SECONDS, 2),
+                # Remaining time only means something for a finite range.
+                "eta": (
+                    round((total - processed) / (recent / _SPEED_WINDOW_SECONDS))
+                    if total and recent and processed < total
+                    else None
+                ),
+            }
+        )
+
+    # Latest metric sample per worker, for live load figures.
+    metrics: dict[int, WorkerMetric | None] = {}
+    for w in workers:
+        metrics[w.id] = (
+            await session.execute(
+                select(WorkerMetric)
+                .where(WorkerMetric.worker_id == w.id)
+                .order_by(WorkerMetric.captured_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+
+    active_downloads = sum((m.active_downloads or 0) for m in metrics.values() if m)
+    active_checks = sum((m.active_checks or 0) for m in metrics.values() if m)
+    total_bytes = (
+        await session.execute(select(func.coalesce(func.sum(FileRecord.size_bytes), 0)))
+    ).scalar_one()
+
+    return {
+        "rows": rows,
+        "workers": list(workers),
+        "metrics": metrics,
+        "active_downloads": active_downloads,
+        "active_checks": active_checks,
+        "total_bytes": total_bytes,
+        "online": sum(1 for w in workers if w.state == "online"),
+    }
+
+
+@router.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request, session: AsyncSession = Depends(get_session)):
+    return _page(request, "index.html", await _dashboard_context(session))
+
+
+@router.get("/fragments/dashboard", response_class=HTMLResponse)
+async def dashboard_fragment(request: Request, session: AsyncSession = Depends(get_session)):
+    """Polled by HTMX so live figures refresh without a page reload."""
+    return _page(request, "_dashboard.html", await _dashboard_context(session))
 
 
 @router.get("/servers", response_class=HTMLResponse)
