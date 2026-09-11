@@ -1,0 +1,59 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---- Environment / secrets ----
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+run/secrets/
+
+# ---- Application data ----
+# Downloaded media and partial files must never be committed
+data/
+videos/
+*.part
+*.mp4
+*.mkv
+*.webm
+storage/
+
+# ---- Docker ----
+*.pid
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- Node (docs generator, if used locally) ----
+node_modules/
