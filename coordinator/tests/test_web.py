@@ -109,6 +109,8 @@ def test_library_shows_readable_size_for_sub_megabyte_files(client):
     body = client.get("/library").text
     assert "256.0 КБ" in body
     assert "0 МБ" not in body
+    # The exact weight must be visible too, not just the rounded figure.
+    assert "262 144 Б" in body
 
 
 def test_player_page_embeds_the_stream(client):

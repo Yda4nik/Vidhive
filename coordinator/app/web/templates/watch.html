@@ -5,7 +5,7 @@
 <div class="card">
   <h2>{{ title }}</h2>
   <p class="muted">
-    ID {{ external_id }} · {{ size_bytes|hsize }}{% if worker %} · хранится на {{ worker }}{% endif %}
+    ID {{ external_id }} · {{ size_bytes|hsize }}{% if size_bytes %} ({{ size_bytes|bexact }}){% endif %}{% if worker %} · хранится на {{ worker }}{% endif %}
   </p>
   <video controls preload="metadata" style="width:100%; max-height:70vh; background:#000; border-radius:10px">
     <source src="/watch/{{ item_id }}" type="video/mp4">

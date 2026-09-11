@@ -5,7 +5,10 @@
     <div class="stat"><span class="v">{{ online }}</span><span class="k">агентов на связи</span></div>
     <div class="stat"><span class="v">{{ active_checks }}</span><span class="k">активных проверок</span></div>
     <div class="stat"><span class="v">{{ active_downloads }}</span><span class="k">активных загрузок</span></div>
-    <div class="stat"><span class="v">{{ total_bytes|hsize }}</span><span class="k">всего загружено</span></div>
+    <div class="stat">
+      <span class="v">{{ total_bytes|hsize }}</span>
+      <span class="k">всего загружено{% if total_bytes %} · {{ total_bytes|bexact }}{% endif %}</span>
+    </div>
   </div>
 </div>
 

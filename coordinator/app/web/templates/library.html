@@ -21,7 +21,10 @@
         <tr>
           <td>{{ it.external_id }}</td>
           <td>{{ it.title }}</td>
-          <td class="muted">{{ it.size_bytes|hsize }}</td>
+          <td class="muted">
+            {{ it.size_bytes|hsize }}
+            {% if it.size_bytes %}<div class="tiny">{{ it.size_bytes|bexact }}</div>{% endif %}
+          </td>
           <td class="muted">{{ it.worker or "—" }}</td>
           <td><a class="btn" href="/player/{{ it.id }}">▶ смотреть</a></td>
         </tr>

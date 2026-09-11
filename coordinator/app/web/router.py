@@ -49,7 +49,15 @@ def _human_size(num: int | None) -> str:
     return f"{value:.1f} ТБ"
 
 
+def _exact_bytes(num: int | None) -> str:
+    """Exact byte count with thousands separators, shown next to the rounded size."""
+    if not num:
+        return ""
+    return f"{num:,}".replace(",", " ") + " Б"
+
+
 templates.env.filters["hsize"] = _human_size
+templates.env.filters["bexact"] = _exact_bytes
 
 router = APIRouter(tags=["web"])
 
