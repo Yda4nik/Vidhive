@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -15,6 +16,7 @@ from typing import Callable
 import httpx
 
 from app.core.config import Settings
+from app.ratelimit import AsyncRateLimiter
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import ItemResult
 
@@ -62,34 +64,70 @@ class Checker:
         http_client: httpx.AsyncClient,
         probe: Callable[[str], dict | None] | None = None,
         download_fn: Callable[[str, str], tuple[str, dict]] | None = None,
+        limiter: AsyncRateLimiter | None = None,
     ) -> None:
         self.settings = settings
         self.http = http_client
         self._probe = probe or _default_probe
         self._download = download_fn or _default_download
+        self.limiter = limiter
 
     def _url(self, external_id: int) -> str:
         return self.settings.target_template.format(id=external_id)
 
-    async def check(self, external_id: int) -> ItemResult:
-        """Phase 1 (status) + phase 2 (metadata). Never downloads."""
-        url = self._url(external_id)
-        try:
-            resp = await self.http.get(url, follow_redirects=True)
-        except httpx.TimeoutException:
-            return ItemResult(external_id=external_id, status=ItemStatus.RETRY_WAIT, error="timeout")
-        except httpx.HTTPError as exc:
-            return ItemResult(external_id=external_id, status=ItemStatus.RETRY_WAIT, error=str(exc))
+    def _backoff(self, attempt: int) -> float:
+        base, cap = self.settings.retry_base_delay, self.settings.retry_max_delay
+        return min(cap, base * (2 ** attempt)) + random.uniform(0, base)
 
-        st = resp.status_code
+    @staticmethod
+    def _retry_after(resp: httpx.Response) -> float | None:
+        value = resp.headers.get("retry-after")
+        if value is None:
+            return None
+        try:
+            return max(0.0, float(value))
+        except ValueError:
+            return None
+
+    async def check(self, external_id: int) -> ItemResult:
+        """Phase 1 (status) + phase 2 (metadata) with retries. Never downloads.
+
+        Transient conditions (429, 5xx, timeout) are retried with exponential
+        backoff + jitter, honouring Retry-After, up to ``max_retries``.
+        """
+        url = self._url(external_id)
+        attempt = 0
+        while True:
+            if self.limiter is not None:
+                await self.limiter.acquire()
+            try:
+                resp = await self.http.get(url, follow_redirects=True)
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                if attempt >= self.settings.max_retries:
+                    return ItemResult(external_id=external_id, status=ItemStatus.RETRY_WAIT, error=str(exc)[:200] or "timeout")
+                await asyncio.sleep(self._backoff(attempt))
+                attempt += 1
+                continue
+
+            st = resp.status_code
+            if st == 429:
+                if attempt >= self.settings.max_retries:
+                    return ItemResult(external_id=external_id, status=ItemStatus.RATE_LIMITED)
+                await asyncio.sleep(self._retry_after(resp) or self._backoff(attempt))
+                attempt += 1
+                continue
+            if st >= 500:
+                if attempt >= self.settings.max_retries:
+                    return ItemResult(external_id=external_id, status=ItemStatus.RETRY_WAIT, error=f"http {st}")
+                await asyncio.sleep(self._backoff(attempt))
+                attempt += 1
+                continue
+            break  # terminal status reached
+
         if st in (401, 403):
             return ItemResult(external_id=external_id, status=ItemStatus.FORBIDDEN)
-        if st == 429:
-            return ItemResult(external_id=external_id, status=ItemStatus.RATE_LIMITED)
         if st in (404, 410):
             return ItemResult(external_id=external_id, status=ItemStatus.NOT_FOUND)
-        if st >= 500:
-            return ItemResult(external_id=external_id, status=ItemStatus.RETRY_WAIT, error=f"http {st}")
         if st != 200:
             return ItemResult(external_id=external_id, status=ItemStatus.NOT_FOUND)
 

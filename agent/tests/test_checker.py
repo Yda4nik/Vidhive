@@ -14,7 +14,9 @@ def _checker(status: int, probe=None):
         return httpx.Response(status, text="body")
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return Checker(Settings(), client, probe=probe or (lambda url: {"title": "t", "webpage_url": url}))
+    # Tiny retry delays so transient-status tests don't actually wait for backoff.
+    settings = Settings(retry_base_delay=0.001, retry_max_delay=0.01, max_retries=2)
+    return Checker(settings, client, probe=probe or (lambda url: {"title": "t", "webpage_url": url}))
 
 
 def _run(coro):
@@ -54,3 +56,33 @@ def test_probe_error_is_not_found():
         raise RuntimeError("no media")
 
     assert _run(_checker(200, probe=boom).check(1)).status == ItemStatus.NOT_FOUND
+
+
+def _fast_settings():
+    return Settings(retry_base_delay=0.001, retry_max_delay=0.01, max_retries=4)
+
+
+def test_check_retries_then_found():
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(429, headers={"retry-after": "0"})
+        return httpx.Response(200, text="ok")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    c = Checker(_fast_settings(), client, probe=lambda url: {"title": "t", "webpage_url": url})
+    r = _run(c.check(1))
+    assert r.status == ItemStatus.FOUND
+    assert calls["n"] == 3  # retried twice, succeeded on the third
+
+
+def test_check_gives_up_after_max_retries():
+    def handler(request):
+        return httpx.Response(429, headers={"retry-after": "0"})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    s = Settings(retry_base_delay=0.001, retry_max_delay=0.01, max_retries=2)
+    r = _run(Checker(s, client).check(1))
+    assert r.status == ItemStatus.RATE_LIMITED

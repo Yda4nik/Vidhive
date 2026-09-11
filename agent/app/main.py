@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 from app.checker import Checker, target_dir
 from app.coordinator_client import CoordinatorClient
 from app.core.config import get_settings
+from app.ratelimit import AsyncRateLimiter
 from app.worker import WorkerRunner
 
 
@@ -26,7 +27,8 @@ async def lifespan(app: FastAPI):
 
     http = httpx.AsyncClient(timeout=settings.check_timeout)
     client = CoordinatorClient(settings.coordinator_url)
-    runner = WorkerRunner(settings, client, Checker(settings, http))
+    limiter = AsyncRateLimiter(settings.rate_limit_rps)
+    runner = WorkerRunner(settings, client, Checker(settings, http, limiter=limiter))
     app.state.runner = runner
     task = asyncio.create_task(runner.run())
     try:

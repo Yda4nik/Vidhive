@@ -77,6 +77,23 @@ class WorkerRunner:
 
             await self.process_chunk(chunk)
 
+    def _collect_metrics(self) -> Heartbeat:
+        hb = Heartbeat(active_checks=self._active_checks, active_downloads=self._active_downloads)
+        try:
+            import os
+
+            import psutil
+
+            hb.cpu_percent = psutil.cpu_percent(interval=None)
+            vm = psutil.virtual_memory()
+            hb.ram_used_mb = round(vm.used / 1048576, 1)
+            hb.ram_total_mb = round(vm.total / 1048576, 1)
+            path = self.settings.storage_path if os.path.isdir(self.settings.storage_path) else "/"
+            hb.disk_free_gb = round(psutil.disk_usage(path).free / 1073741824, 2)
+        except Exception as exc:  # noqa: BLE001 - metrics are best-effort
+            log.debug("metrics collection failed: %s", exc)
+        return hb
+
     async def _heartbeat_loop(self) -> None:
         while not self._stop.is_set():
             await self._sleep(self.settings.heartbeat_interval)
@@ -84,12 +101,7 @@ class WorkerRunner:
                 continue
             try:
                 await self.client.heartbeat(
-                    self.worker_id,
-                    Heartbeat(
-                        active_checks=self._active_checks,
-                        active_downloads=self._active_downloads,
-                    ),
-                    self.settings.lease_seconds,
+                    self.worker_id, self._collect_metrics(), self.settings.lease_seconds
                 )
             except Exception as exc:  # noqa: BLE001
                 log.debug("heartbeat failed: %s", exc)

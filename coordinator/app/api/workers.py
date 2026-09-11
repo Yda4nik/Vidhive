@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Worker
+from app.db.models import Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
 from vidhive_common.enums import ChunkStatus, WorkerState
@@ -79,6 +79,23 @@ async def heartbeat(
     worker = await _get_worker_or_404(session, worker_id)
     worker.state = WorkerState.ONLINE.value
     await scheduler.renew_worker_leases(session, worker, lease_seconds)
+
+    # Store a metrics sample if the heartbeat carried resource data.
+    if any(
+        v is not None
+        for v in (payload.cpu_percent, payload.ram_used_mb, payload.disk_free_gb)
+    ):
+        session.add(
+            WorkerMetric(
+                worker_id=worker.id,
+                cpu_percent=payload.cpu_percent,
+                ram_used_mb=payload.ram_used_mb,
+                ram_total_mb=payload.ram_total_mb,
+                disk_free_gb=payload.disk_free_gb,
+                active_checks=payload.active_checks,
+                active_downloads=payload.active_downloads,
+            )
+        )
     await session.commit()
     return Ack()
 

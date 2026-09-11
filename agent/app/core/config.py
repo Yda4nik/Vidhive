@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     progress_batch: int = 50            # identifiers per progress report / checkpoint
     enable_download: bool = True
 
+    # Rate limiting and retries (spec section 9).
+    rate_limit_rps: float | None = None   # global checks/sec for this agent; None = unlimited
+    max_retries: int = 4
+    retry_base_delay: float = 1.0
+    retry_max_delay: float = 60.0
+
     log_level: str = "INFO"
 
     def advertised_url(self) -> str:

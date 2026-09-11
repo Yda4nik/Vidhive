@@ -19,7 +19,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.jobs import create_job, pause_job, resume_job, start_job, stop_job
-from app.db.models import Item, Job, MediaMetadata, Worker
+from app.db.models import Item, Job, MediaMetadata, Worker, WorkerMetric
 from app.db.session import get_session
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import JobCreate
@@ -54,7 +54,17 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
 @router.get("/servers", response_class=HTMLResponse)
 async def servers(request: Request, session: AsyncSession = Depends(get_session)):
     workers = (await session.execute(select(Worker).order_by(Worker.name))).scalars().all()
-    return _page(request, "servers.html", {"workers": list(workers)})
+    metrics: dict[int, WorkerMetric | None] = {}
+    for w in workers:
+        metrics[w.id] = (
+            await session.execute(
+                select(WorkerMetric)
+                .where(WorkerMetric.worker_id == w.id)
+                .order_by(WorkerMetric.captured_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+    return _page(request, "servers.html", {"workers": list(workers), "metrics": metrics})
 
 
 @router.get("/jobs", response_class=HTMLResponse)
