@@ -21,9 +21,9 @@
         <tr>
           <td>{{ it.external_id }}</td>
           <td>{{ it.title }}</td>
-          <td class="muted">{{ (it.size_bytes // 1048576) ~ " МБ" if it.size_bytes else "—" }}</td>
+          <td class="muted">{{ it.size_bytes|hsize }}</td>
           <td class="muted">{{ it.worker or "—" }}</td>
-          <td><a class="btn" href="/watch/{{ it.id }}" target="_blank">▶ смотреть</a></td>
+          <td><a class="btn" href="/player/{{ it.id }}">▶ смотреть</a></td>
         </tr>
         {% endfor %}
       </tbody>

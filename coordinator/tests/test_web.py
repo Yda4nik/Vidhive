@@ -41,6 +41,60 @@ def test_job_action_pause(client):
     assert "paused" in r.text
 
 
+def test_library_shows_readable_size_for_sub_megabyte_files(client):
+    """A 256 KB file must not render as '0 МБ' (integer-MB truncation bug)."""
+    job = client.post("/api/jobs", json={"range_start": 5, "range_end": 5, "chunk_size": 1}).json()
+    client.post(f"/api/jobs/{job['id']}/start")
+    wid = client.post("/api/workers/register", json={"name": "agent-01"}).json()["id"]
+    lease = client.post(
+        f"/api/workers/{wid}/lease", json={"worker_id": wid, "lease_seconds": 120}
+    ).json()
+    client.post(
+        f"/api/workers/{wid}/progress",
+        json={
+            "chunk_id": lease["chunk_id"],
+            "next_id": 6,
+            "items": [
+                {
+                    "external_id": 5,
+                    "status": "completed",
+                    "title": "clip",
+                    "size_bytes": 262144,
+                    "storage_path": "/data/videos/0/5/video.mp4",
+                }
+            ],
+        },
+    )
+
+    body = client.get("/library").text
+    assert "256.0 КБ" in body
+    assert "0 МБ" not in body
+
+
+def test_player_page_embeds_the_stream(client):
+    job = client.post("/api/jobs", json={"range_start": 5, "range_end": 5, "chunk_size": 1}).json()
+    client.post(f"/api/jobs/{job['id']}/start")
+    wid = client.post("/api/workers/register", json={"name": "agent-01"}).json()["id"]
+    lease = client.post(
+        f"/api/workers/{wid}/lease", json={"worker_id": wid, "lease_seconds": 120}
+    ).json()
+    client.post(
+        f"/api/workers/{wid}/progress",
+        json={
+            "chunk_id": lease["chunk_id"],
+            "next_id": 6,
+            "items": [{"external_id": 5, "status": "completed", "title": "clip"}],
+        },
+    )
+    items = client.get(f"/api/jobs/{job['id']}/items").json()
+    item_id = items[0]["id"]
+
+    r = client.get(f"/player/{item_id}")
+    assert r.status_code == 200
+    assert f'src="/watch/{item_id}"' in r.text
+    assert "<video" in r.text
+
+
 def test_servers_and_library_pages(client):
     assert client.get("/servers").status_code == 200
     lib = client.get("/library")

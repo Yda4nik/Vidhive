@@ -34,6 +34,22 @@ from vidhive_common.schemas import JobCreate
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+
+def _human_size(num: int | None) -> str:
+    """Readable size in binary units — a 256 KB file must not read as '0 МБ'."""
+    if not num:
+        return "—"
+    value = float(num)
+    units = ("Б", "КБ", "МБ", "ГБ", "ТБ")
+    for index, unit in enumerate(units):
+        if value < 1024 or index == len(units) - 1:
+            return f"{value:.0f} {unit}" if index == 0 else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} ТБ"
+
+
+templates.env.filters["hsize"] = _human_size
+
 router = APIRouter(tags=["web"])
 
 _KINESCOPE_ID = re.compile(r"(\d+)")
@@ -150,6 +166,29 @@ async def library(request: Request, q: str = "", session: AsyncSession = Depends
         for item, meta, worker in rows
     ]
     return _page(request, "library.html", {"items": items, "q": q})
+
+
+@router.get("/player/{item_id}", response_class=HTMLResponse)
+async def player(item_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    """A real player page; the <video> element streams from /watch/{id}."""
+    item = await session.get(Item, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    meta = (
+        await session.execute(select(MediaMetadata).where(MediaMetadata.item_id == item.id))
+    ).scalars().first()
+    worker = await session.get(Worker, item.worker_id) if item.worker_id else None
+    return _page(
+        request,
+        "watch.html",
+        {
+            "item_id": item.id,
+            "external_id": item.external_id,
+            "title": (meta.title if meta else None) or f"ID {item.external_id}",
+            "size_bytes": meta.size_bytes if meta else None,
+            "worker": worker.name if worker else None,
+        },
+    )
 
 
 _STREAM_HEADERS = ("content-type", "content-length", "accept-ranges", "content-range")

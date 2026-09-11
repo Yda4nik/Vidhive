@@ -16,20 +16,35 @@ Response is chosen deterministically from the identifier:
 
 import asyncio
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
-# A deterministic pseudo-video payload; size is configurable for load tests.
+# A real, playable MP4 is generated at image build time so the whole pipeline —
+# including playback in the browser — can be verified end to end. If it is
+# missing, fall back to a synthetic payload (downloadable, but not decodable).
+SAMPLE = Path("/srv/sample.mp4")
 PAYLOAD_KB = int(os.environ.get("MOCK_PAYLOAD_KB", "256"))
-VIDEO_BYTES = bytes((i * 7 + 13) % 251 for i in range(PAYLOAD_KB * 1024))
+
+if SAMPLE.exists():
+    VIDEO_BYTES = SAMPLE.read_bytes()
+    PLAYABLE = True
+else:
+    VIDEO_BYTES = bytes((i * 7 + 13) % 251 for i in range(PAYLOAD_KB * 1024))
+    PLAYABLE = False
 
 app = FastAPI(title="Vidhive Mock Target", version="1.0.0")
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "service": "mock", "payload_kb": PAYLOAD_KB}
+    return {
+        "status": "ok",
+        "service": "mock",
+        "payload_bytes": len(VIDEO_BYTES),
+        "playable": PLAYABLE,
+    }
 
 
 @app.get("/{external_id}")

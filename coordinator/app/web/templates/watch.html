@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — Vidhive{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>{{ title }}</h2>
+  <p class="muted">
+    ID {{ external_id }} · {{ size_bytes|hsize }}{% if worker %} · хранится на {{ worker }}{% endif %}
+  </p>
+  <video controls preload="metadata" style="width:100%; max-height:70vh; background:#000; border-radius:10px">
+    <source src="/watch/{{ item_id }}" type="video/mp4">
+    Ваш браузер не умеет воспроизводить это видео.
+  </video>
+  <p class="muted" style="margin-top:12px">
+    Файл физически лежит на агенте{% if worker %} <b>{{ worker }}</b>{% endif %}; координатор отдаёт его
+    потоком с поддержкой перемотки.
+  </p>
+  <div style="margin-top:12px">
+    <a class="btn" href="/library">← к библиотеке</a>
+    <a class="btn" href="/watch/{{ item_id }}">открыть файл напрямую</a>
+  </div>
+</div>
+
+{% endblock %}
