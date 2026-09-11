@@ -24,9 +24,11 @@ class Settings(BaseSettings):
 
     # Target and processing.
     target_template: str = "http://kinescope.io/{id}"
-    lease_seconds: int = 120
-    poll_interval: float = 3.0          # wait between lease attempts when idle
-    heartbeat_interval: float = 30.0
+    # Lease window with ~4 heartbeats inside it: a dead agent's block returns to
+    # the queue quickly, while a live one never loses its lease.
+    lease_seconds: int = 60
+    poll_interval: float = 1.0          # wait between lease attempts when idle
+    heartbeat_interval: float = 15.0
     check_timeout: float = 20.0
     progress_batch: int = 50            # identifiers per progress report / checkpoint
     enable_download: bool = True

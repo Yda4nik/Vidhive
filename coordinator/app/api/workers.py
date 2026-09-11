@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
+from app.services.events import log_event
 from vidhive_common.enums import ChunkStatus, WorkerState
 from vidhive_common.schemas import (
     Ack,
@@ -52,7 +53,16 @@ async def register_worker(
     worker.storage_path = payload.storage_path
     worker.state = WorkerState.ONLINE.value
     worker.last_heartbeat_at = datetime.now(timezone.utc)
+    await session.flush()
 
+    log_event(
+        session,
+        component="workers",
+        operation="register",
+        result="online",
+        worker_id=worker.id,
+        message=f"{worker.name} at {worker.agent_url or '-'} ({worker.threads} threads)",
+    )
     await session.commit()
     await session.refresh(worker)
     return worker

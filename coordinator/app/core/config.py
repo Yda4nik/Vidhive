@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     default_chunk_size: int = 5000
     default_lease_seconds: int = 120
 
+    # Stop issuing blocks to a worker that is running out of disk (spec 6.3).
+    min_free_space_gb: float = 5.0
+
     log_level: str = "INFO"
 
 

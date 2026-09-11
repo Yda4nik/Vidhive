@@ -165,6 +165,7 @@ class WorkerRunner:
                     result.status = ItemStatus.COMPLETED
                     result.size_bytes = file.size_bytes or result.size_bytes
                     result.mime_type = file.mime_type or result.mime_type
+                    result.storage_path = file.path
                 except Exception as exc:  # noqa: BLE001 - a failed download is not fatal
                     result.status = ItemStatus.FAILED
                     result.error = str(exc)[:200]

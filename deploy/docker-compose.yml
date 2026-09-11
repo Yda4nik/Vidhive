@@ -35,12 +35,27 @@ services:
       retries: 5
     networks: [vidhive]
 
+  # Controllable stand-in for the target service, for safe end-to-end runs
+  # (spec sections 20 and 23). Returns 200+video / 404 / 403 / 429 / 500 by id.
+  mock:
+    build:
+      context: ..
+      dockerfile: mock/Dockerfile
+    environment:
+      MOCK_PAYLOAD_KB: ${MOCK_PAYLOAD_KB:-256}
+    ports:
+      - "8090:8090"
+    networks: [vidhive]
+
   agent-01:
     build:
       context: ..
       dockerfile: agent/Dockerfile
     environment:
       VIDHIVE_COORDINATOR_URL: http://coordinator:8000
+      # Point at the mock service for safe end-to-end runs; defaults to the real target.
+      VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
+      VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-01
       VIDHIVE_THREADS: "8"
       VIDHIVE_STORAGE_PATH: /data/videos
@@ -57,6 +72,9 @@ services:
       dockerfile: agent/Dockerfile
     environment:
       VIDHIVE_COORDINATOR_URL: http://coordinator:8000
+      # Point at the mock service for safe end-to-end runs; defaults to the real target.
+      VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
+      VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-02
       VIDHIVE_THREADS: "16"
       VIDHIVE_STORAGE_PATH: /data/videos
@@ -73,6 +91,9 @@ services:
       dockerfile: agent/Dockerfile
     environment:
       VIDHIVE_COORDINATOR_URL: http://coordinator:8000
+      # Point at the mock service for safe end-to-end runs; defaults to the real target.
+      VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
+      VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-03
       VIDHIVE_THREADS: "8"
       VIDHIVE_STORAGE_PATH: /data/videos

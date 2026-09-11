@@ -20,8 +20,18 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.db.models import Item, Job, MediaMetadata, RangeChunk, Worker
-from vidhive_common.enums import ChunkStatus, ItemStatus, JobState
+from app.db.models import (
+    Download,
+    FileRecord,
+    Item,
+    Job,
+    MediaMetadata,
+    RangeChunk,
+    Worker,
+    WorkerMetric,
+)
+from app.services.events import log_event
+from vidhive_common.enums import ChunkStatus, DownloadStatus, ItemStatus, JobState
 from vidhive_common.schemas import ProgressReport
 
 
@@ -43,7 +53,32 @@ async def reclaim_expired(session: AsyncSession) -> int:
             attempt=RangeChunk.attempt + 1,
         )
     )
-    return result.rowcount or 0
+    count = result.rowcount or 0
+    if count:
+        log_event(
+            session,
+            component="scheduler",
+            operation="reclaim",
+            level="warning",
+            result="requeued",
+            message=f"{count} chunk(s) returned to the queue after lease expiry",
+        )
+    return count
+
+
+async def _worker_has_space(session: AsyncSession, worker: Worker) -> bool:
+    """Stop issuing work to a worker that is running out of disk (spec 6.3)."""
+    metric = (
+        await session.execute(
+            select(WorkerMetric)
+            .where(WorkerMetric.worker_id == worker.id)
+            .order_by(WorkerMetric.captured_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+    if metric is None or metric.disk_free_gb is None:
+        return True  # no telemetry yet — don't block work on missing data
+    return metric.disk_free_gb >= get_settings().min_free_space_gb
 
 
 async def _take_pending_chunk(session: AsyncSession) -> RangeChunk | None:
@@ -99,6 +134,18 @@ async def lease_chunk(
     """Lease the next available chunk to ``worker``, generating one if needed."""
     await reclaim_expired(session)
 
+    if not await _worker_has_space(session, worker):
+        log_event(
+            session,
+            component="scheduler",
+            operation="lease",
+            level="warning",
+            result="skipped",
+            message="worker is below the free-space threshold",
+            worker_id=worker.id,
+        )
+        return None
+
     chunk = await _take_pending_chunk(session)
     if chunk is None:
         chunk = await _generate_chunk(session)
@@ -110,6 +157,16 @@ async def lease_chunk(
     chunk.lease_expires_at = _now() + timedelta(seconds=lease_seconds)
     if chunk.next_id is None:
         chunk.next_id = chunk.range_start
+    log_event(
+        session,
+        component="scheduler",
+        operation="lease",
+        result="granted",
+        message=f"chunk [{chunk.range_start},{chunk.range_end}] from {chunk.next_id}",
+        job_id=chunk.job_id,
+        worker_id=worker.id,
+        chunk_id=chunk.id,
+    )
     await session.flush()
     return chunk
 
@@ -177,8 +234,51 @@ async def apply_progress(session: AsyncSession, worker: Worker, report: Progress
             meta.download_url = item.download_url
             meta.mime_type = item.mime_type
             meta.size_bytes = item.size_bytes
+
+        if item.status == ItemStatus.COMPLETED and item.storage_path:
+            await _record_download(session, row, worker, item)
     await session.flush()
     return chunk
+
+
+async def _record_download(
+    session: AsyncSession, row: Item, worker: Worker, item
+) -> None:
+    """Record where a finished file physically lives, idempotently.
+
+    The database is the catalogue: bytes stay on the agent, but this row is what
+    lets the web find and stream the file later.
+    """
+    download = (
+        await session.execute(select(Download).where(Download.item_id == row.id))
+    ).scalars().first()
+    if download is None:
+        download = Download(item_id=row.id)
+        session.add(download)
+    download.worker_id = worker.id
+    download.status = DownloadStatus.COMPLETED.value
+    download.progress = 100.0
+    download.bytes_downloaded = item.size_bytes or 0
+    download.finished_at = _now()
+    await session.flush()
+
+    existing = (
+        await session.execute(
+            select(FileRecord)
+            .where(FileRecord.download_id == download.id)
+            .where(FileRecord.storage_path == item.storage_path)
+        )
+    ).scalars().first()
+    if existing is None:
+        session.add(
+            FileRecord(
+                download_id=download.id,
+                storage_path=item.storage_path,
+                checksum=item.checksum,
+                size_bytes=item.size_bytes,
+                worker_name=worker.name,
+            )
+        )
 
 
 async def complete_chunk(

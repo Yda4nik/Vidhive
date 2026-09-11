@@ -109,6 +109,9 @@ class ItemResult(BaseModel):
     download_url: str | None = None
     size_bytes: int | None = None
     mime_type: str | None = None
+    # Local path on the reporting agent once the file has been downloaded.
+    storage_path: str | None = None
+    checksum: str | None = None
     error: str | None = None
 
 
@@ -125,3 +128,34 @@ class ChunkComplete(BaseModel):
 
 class Ack(BaseModel):
     ok: bool = True
+
+
+# --------------------------------------------------------------------------- #
+# Read models for the API
+# --------------------------------------------------------------------------- #
+class ItemOut(BaseModel):
+    id: int
+    external_id: int
+    status: ItemStatus
+    attempts: int
+    title: str | None = None
+    size_bytes: int | None = None
+    worker: str | None = None
+    last_error: str | None = None
+    checked_at: datetime | None = None
+
+
+class EventOut(BaseModel):
+    id: int
+    ts: datetime
+    level: str
+    component: str | None
+    operation: str | None
+    result: str | None
+    message: str | None
+    job_id: int | None
+    worker_id: int | None
+    chunk_id: int | None
+    item_id: int | None
+
+    model_config = {"from_attributes": True}
