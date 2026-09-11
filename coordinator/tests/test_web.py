@@ -17,3 +17,32 @@ def test_dashboard_empty_state(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "Заданий пока нет." in r.text
+
+
+def test_add_range_creates_and_starts_job(client):
+    r = client.post("/add", data={"mode": "range", "value": "[0,50]", "name": "scan", "chunk_size": "10"})
+    assert r.status_code == 200          # followed redirect to /jobs
+    assert "scan" in r.text
+    assert "running" in r.text           # job was started
+
+
+def test_add_single_id_from_url(client):
+    r = client.post(
+        "/add", data={"mode": "single", "value": "http://kinescope.io/200673499", "name": ""}
+    )
+    assert r.status_code == 200
+    assert "200673499" in r.text
+
+
+def test_job_action_pause(client):
+    client.post("/add", data={"mode": "range", "value": "[0,50]", "name": "scan", "chunk_size": "10"})
+    r = client.post("/jobs/1/pause")
+    assert r.status_code == 200
+    assert "paused" in r.text
+
+
+def test_servers_and_library_pages(client):
+    assert client.get("/servers").status_code == 200
+    lib = client.get("/library")
+    assert lib.status_code == 200
+    assert "Пока ничего не загружено" in lib.text

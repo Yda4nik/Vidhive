@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — библиотека{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Библиотека</h2>
+  <form method="get" action="/library" class="row">
+    <input type="text" name="q" value="{{ q }}" placeholder="поиск по названию или ID">
+    <input type="submit" class="btn" value="Найти">
+    {% if q %}<a class="btn" href="/library">сброс</a>{% endif %}
+  </form>
+</div>
+
+<div class="card">
+  {% if items %}
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Название</th><th>Размер</th><th>Сервер</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>{{ it.external_id }}</td>
+          <td>{{ it.title }}</td>
+          <td class="muted">{{ (it.size_bytes // 1048576) ~ " МБ" if it.size_bytes else "—" }}</td>
+          <td class="muted">{{ it.worker or "—" }}</td>
+          <td><a class="btn" href="/watch/{{ it.id }}" target="_blank">▶ смотреть</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">
+      {% if q %}Ничего не найдено по запросу «{{ q }}».{% else %}Пока ничего не загружено.{% endif %}
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

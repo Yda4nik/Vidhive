@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — серверы{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Рабочие серверы</h2>
+  {% if workers %}
+    <table>
+      <thead>
+        <tr><th>Имя</th><th>Адрес</th><th>Состояние</th><th>Потоки</th><th>Версия</th><th>Последний heartbeat</th></tr>
+      </thead>
+      <tbody>
+        {% for w in workers %}
+        <tr>
+          <td>{{ w.name }}</td>
+          <td class="muted">{{ w.agent_url or w.host or "—" }}</td>
+          <td><span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span></td>
+          <td>{{ w.threads or "—" }}</td>
+          <td>{{ w.agent_version or "—" }}</td>
+          <td class="muted">{{ w.last_heartbeat_at.strftime("%Y-%m-%d %H:%M:%S") if w.last_heartbeat_at else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Серверы ещё не подключены. Запустите контейнеры агентов — они зарегистрируются сами.</p>
+  {% endif %}
+</div>
+{% endblock %}

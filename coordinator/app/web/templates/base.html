@@ -24,8 +24,20 @@
     .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; }
     .pill.ok { background:rgba(63,178,127,.15); color:var(--ok); }
     .pill.bad { background:rgba(224,90,90,.15); color:var(--bad); }
+    .pill.run { background:rgba(124,156,255,.18); color:var(--accent); }
     .muted { color:var(--muted); }
     .empty { color:var(--muted); font-style:italic; }
+    a.btn, button.btn, input[type=submit] { display:inline-block; padding:6px 12px; border-radius:8px;
+      border:1px solid var(--line); background:#232c40; color:var(--txt); font-size:13px; cursor:pointer;
+      text-decoration:none; }
+    a.btn:hover, button.btn:hover { border-color:var(--accent); }
+    .btn.primary { background:var(--accent); color:#0f1420; border-color:var(--accent); }
+    form.inline { display:inline; margin:0; }
+    label { display:block; margin:12px 0 4px; color:var(--muted); font-size:13px; }
+    input[type=text], input[type=number], select { width:100%; padding:8px 10px; border-radius:8px;
+      border:1px solid var(--line); background:#121826; color:var(--txt); font-size:14px; }
+    .row { display:flex; gap:12px; align-items:center; }
+    .actions { display:flex; gap:6px; }
   </style>
 </head>
 <body>
@@ -33,9 +45,10 @@
     <h1>🐝 Vidhive</h1>
     <nav>
       <a href="/">Панель</a>
-      <a href="#">Серверы</a>
-      <a href="#">Библиотека</a>
-      <a href="#">Задания</a>
+      <a href="/servers">Серверы</a>
+      <a href="/library">Библиотека</a>
+      <a href="/jobs">Задания</a>
+      <a href="/add">+ Загрузка</a>
       <a href="/docs">API</a>
     </nav>
   </header>
