@@ -258,6 +258,7 @@ async def library(
     q: str = "",
     group: str = "all",
     source: str = "",
+    server: str = "",
     sort: str = "date",
     order: str = "desc",
     session: AsyncSession = Depends(get_session),
@@ -287,6 +288,8 @@ async def library(
         stmt = stmt.where(or_(*filters))
     if source:
         stmt = stmt.where(MediaMetadata.source == source)
+    if server:
+        stmt = stmt.where(Worker.name == server)
 
     # Group filter: "all" = everything, "fav" = favourites, or a numeric group id.
     filter_group_id = None
@@ -339,6 +342,15 @@ async def library(
             )
         ).scalars().all()
     ]
+    servers = (
+        await session.execute(
+            select(Worker.name)
+            .join(Item, Item.worker_id == Worker.id)
+            .where(Item.status == ItemStatus.COMPLETED.value)
+            .distinct()
+            .order_by(Worker.name)
+        )
+    ).scalars().all()
     total = (
         await session.execute(
             select(func.count(func.distinct(Item.external_id))).where(
@@ -355,10 +367,12 @@ async def library(
             "q": q,
             "group": group,
             "source": source,
+            "server": server,
             "sort": sort,
             "order": order,
             "groups": groups,
             "sources": sources,
+            "servers": list(servers),
             "fav_id": fav.id,
             "total_count": total,
         },

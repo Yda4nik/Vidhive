@@ -48,6 +48,12 @@
       {% for s in sources %}<option value="{{ s }}" {{ 'selected' if source == s else '' }}>{{ s }}</option>{% endfor %}
     </select>
 
+    <label style="margin:0">Сервер</label>
+    <select onchange="setParam('server', this.value)">
+      <option value="">Все</option>
+      {% for s in servers %}<option value="{{ s }}" {{ 'selected' if server == s else '' }}>{{ s }}</option>{% endfor %}
+    </select>
+
     <label style="margin:0">Сортировка</label>
     <select onchange="setParam('sort', this.value)">
       <option value="date"     {{ 'selected' if sort == 'date' else '' }}>по дате</option>

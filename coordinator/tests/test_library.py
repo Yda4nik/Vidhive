@@ -83,6 +83,14 @@ def test_source_filter_and_duration_shown(client):
     assert _row(item_id) not in client.get("/library", params={"source": "youtube"}).text
 
 
+def test_server_filter(client):
+    a = _completed_item(client, 11, worker="agent-01")
+    b = _completed_item(client, 12, worker="agent-02")
+    page = client.get("/library", params={"server": "agent-01"}).text
+    assert _row(a) in page
+    assert _row(b) not in page
+
+
 def test_delete_video_removes_it(client, raw_sql):
     # Worker without agent_url: deletion skips the agent call and clears the DB.
     item_id = _completed_item(client, 9)
