@@ -16,8 +16,11 @@
   tbody tr.vid.selected { background:rgba(124,156,255,.20); }
   .bulkbar { display:none; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px;
     padding:10px 14px; background:var(--card); border:1px solid var(--accent); border-radius:10px; }
-  .star { background:none; border:none; cursor:pointer; font-size:16px; color:var(--accent); padding:0 4px; }
-  .del { background:none; border:none; cursor:pointer; font-size:15px; color:var(--bad); padding:0 4px; }
+  .star, .del { background:none; border:none; cursor:pointer; font-size:22px; padding:2px 8px;
+    border-radius:8px; vertical-align:middle; }
+  .star { color:var(--accent); }
+  .del { color:var(--bad); }
+  .star:hover, .del:hover { background:rgba(124,156,255,.12); }
 </style>
 
 <div class="card">
