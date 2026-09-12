@@ -7,7 +7,7 @@ def _register(client, name="agent-01"):
     ).json()["id"]
 
 
-def test_heartbeat_stores_metrics_shown_on_servers_page(client):
+def test_heartbeat_stores_metrics_shown_on_dashboard(client):
     wid = _register(client)
     client.post(
         f"/api/workers/{wid}/heartbeat",
@@ -19,7 +19,8 @@ def test_heartbeat_stores_metrics_shown_on_servers_page(client):
             "active_downloads": 2,
         },
     )
-    r = client.get("/servers")
+    # Server metrics now live on the dashboard (the Servers page was removed).
+    r = client.get("/")
     assert r.status_code == 200
     assert "42" in r.text          # cpu percent rendered
     assert "123.4" in r.text       # disk free rendered

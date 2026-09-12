@@ -1,14 +1,47 @@
 {% extends "base.html" %}
 {% block title %}Vidhive — задания{% endblock %}
 {% block content %}
+
 <div class="card">
-  <div class="row" style="justify-content:space-between">
-    <h2 style="margin:0">Задания</h2>
-    <a class="btn primary" href="/add">+ Новая загрузка</a>
-  </div>
+  <details open>
+    <summary style="cursor:pointer; font-size:16px; font-weight:600; list-style:none">➕ Добавить загрузку</summary>
+    <form method="post" action="/add" style="margin-top:12px">
+      <div class="row" style="align-items:flex-end; flex-wrap:wrap">
+        <div style="flex:2; min-width:240px">
+          <label>Что скачать</label>
+          <input type="text" name="value" placeholder="[0,500000]  ·  200673499  ·  https://kinescope.io/200673499">
+        </div>
+        <div style="flex:1; min-width:150px">
+          <label>Режим</label>
+          <select name="mode">
+            <option value="range">Диапазон</option>
+            <option value="single">Один ID / ссылка</option>
+          </select>
+        </div>
+        <div style="flex:1; min-width:110px">
+          <label>Размер блока</label>
+          <input type="number" name="chunk_size" value="5000" min="1">
+        </div>
+      </div>
+      <div class="row" style="align-items:flex-end; flex-wrap:wrap; margin-top:4px">
+        <div style="flex:2; min-width:240px">
+          <label>Название (необязательно)</label>
+          <input type="text" name="name" placeholder="например, вебинары по матанализу">
+        </div>
+        <div style="flex:1; min-width:150px">
+          <input type="submit" class="btn primary" value="Создать и запустить" style="width:100%">
+        </div>
+      </div>
+    </form>
+    <p class="muted tiny" style="margin-top:10px">
+      Диапазон: <code>[A,B]</code> — от A до B, <code>A</code> — от 0 до A, <code>[A,]</code> — от A без конца, пусто — с 0 без конца.
+      «Один ID / ссылка» создаёт задание на одну запись.
+    </p>
+  </details>
 </div>
 
 <div class="card">
+  <h2>Задания</h2>
   {% if jobs %}
     <table>
       <thead>
@@ -45,7 +78,7 @@
       </tbody>
     </table>
   {% else %}
-    <p class="empty">Заданий пока нет. <a href="/add">Создайте первое.</a></p>
+    <p class="empty">Заданий пока нет — добавьте загрузку в форме выше.</p>
   {% endif %}
 </div>
 {% endblock %}

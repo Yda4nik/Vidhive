@@ -176,22 +176,6 @@ async def dashboard_fragment(request: Request, session: AsyncSession = Depends(g
     return _page(request, "_dashboard.html", await _dashboard_context(session))
 
 
-@router.get("/servers", response_class=HTMLResponse)
-async def servers(request: Request, session: AsyncSession = Depends(get_session)):
-    workers = (await session.execute(select(Worker).order_by(Worker.name))).scalars().all()
-    metrics: dict[int, WorkerMetric | None] = {}
-    for w in workers:
-        metrics[w.id] = (
-            await session.execute(
-                select(WorkerMetric)
-                .where(WorkerMetric.worker_id == w.id)
-                .order_by(WorkerMetric.captured_at.desc())
-                .limit(1)
-            )
-        ).scalars().first()
-    return _page(request, "servers.html", {"workers": list(workers), "metrics": metrics})
-
-
 @router.get("/jobs", response_class=HTMLResponse)
 async def jobs_page(request: Request, session: AsyncSession = Depends(get_session)):
     jobs = (await session.execute(select(Job).order_by(Job.id.desc()))).scalars().all()
@@ -208,11 +192,6 @@ async def job_action(job_id: int, action: str, session: AsyncSession = Depends(g
     except HTTPException:
         raise
     return RedirectResponse(url="/jobs", status_code=303)
-
-
-@router.get("/add", response_class=HTMLResponse)
-async def add_form(request: Request):
-    return _page(request, "add.html", {})
 
 
 @router.post("/add")

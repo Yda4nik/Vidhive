@@ -163,8 +163,19 @@ def test_player_page_embeds_the_stream(client):
     assert "<video" in r.text
 
 
-def test_servers_and_library_pages(client):
-    assert client.get("/servers").status_code == 200
+def test_servers_page_removed(client):
+    # The Servers page was merged into the dashboard; the route is gone.
+    assert client.get("/servers").status_code == 404
+
+
+def test_jobs_page_hosts_the_add_form(client):
+    # Add-download was merged into the Jobs page.
+    body = client.get("/jobs").text
+    assert 'action="/add"' in body
+    assert "Добавить загрузку" in body
+
+
+def test_library_page_renders(client):
     lib = client.get("/library")
     assert lib.status_code == 200
     assert "Пока ничего не загружено" in lib.text

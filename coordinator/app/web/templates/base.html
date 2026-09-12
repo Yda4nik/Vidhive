@@ -4,17 +4,35 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Vidhive{% endblock %}</title>
+  <script>
+    // Apply the saved theme before paint to avoid a flash.
+    (function () {
+      try {
+        var t = localStorage.getItem("vidhive-theme");
+        if (t) document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
+    /* Dark is the default palette; light overrides via [data-theme="light"]. */
     :root { --bg:#0f1420; --card:#1a2130; --line:#2a3550; --txt:#e8edf5; --muted:#94a3b8;
-            --accent:#7c9cff; --ok:#3fb27f; --bad:#e05a5a; }
+            --accent:#7c9cff; --ok:#3fb27f; --bad:#e05a5a;
+            --btn-bg:#232c40; --input-bg:#121826; --bar-bg:#0d1220; --on-accent:#0f1420; }
+    :root[data-theme="light"] { --bg:#f4f6fb; --card:#ffffff; --line:#e2e7f0; --txt:#1a2233; --muted:#5b6577;
+            --accent:#3f63d6; --ok:#1f9d63; --bad:#d23b3b;
+            --btn-bg:#eef1f7; --input-bg:#ffffff; --bar-bg:#e6eaf2; --on-accent:#ffffff; }
     * { box-sizing:border-box; }
     body { margin:0; font:15px/1.6 system-ui,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--txt); }
-    header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:16px; }
-    header h1 { font-size:20px; margin:0; font-weight:600; }
-    header nav { margin-left:auto; display:flex; gap:18px; }
+    header { padding:14px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:16px; }
+    .brand { flex:1; font-size:20px; font-weight:600; white-space:nowrap; }
+    header nav { flex:2; display:flex; gap:22px; justify-content:center; flex-wrap:wrap; }
     header nav a { color:var(--muted); text-decoration:none; }
     header nav a:hover { color:var(--txt); }
+    .head-right { flex:1; display:flex; justify-content:flex-end; }
+    #theme-btn { background:var(--btn-bg); border:1px solid var(--line); color:var(--txt);
+      width:34px; height:34px; border-radius:8px; cursor:pointer; font-size:16px; line-height:1; }
+    #theme-btn:hover { border-color:var(--accent); }
     main { padding:24px; max-width:1100px; margin:0 auto; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:20px; }
     .card h2 { margin:0 0 12px; font-size:16px; font-weight:600; }
@@ -28,39 +46,56 @@
     .muted { color:var(--muted); }
     .empty { color:var(--muted); font-style:italic; }
     a.btn, button.btn, input[type=submit] { display:inline-block; padding:6px 12px; border-radius:8px;
-      border:1px solid var(--line); background:#232c40; color:var(--txt); font-size:13px; cursor:pointer;
+      border:1px solid var(--line); background:var(--btn-bg); color:var(--txt); font-size:13px; cursor:pointer;
       text-decoration:none; }
     a.btn:hover, button.btn:hover { border-color:var(--accent); }
-    .btn.primary { background:var(--accent); color:#0f1420; border-color:var(--accent); }
+    .btn.primary { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
     form.inline { display:inline; margin:0; }
     label { display:block; margin:12px 0 4px; color:var(--muted); font-size:13px; }
     input[type=text], input[type=number], select { width:100%; padding:8px 10px; border-radius:8px;
-      border:1px solid var(--line); background:#121826; color:var(--txt); font-size:14px; }
+      border:1px solid var(--line); background:var(--input-bg); color:var(--txt); font-size:14px; }
     .row { display:flex; gap:12px; align-items:center; }
-    .actions { display:flex; gap:6px; }
+    .actions { display:flex; gap:6px; flex-wrap:wrap; }
     .stats { display:flex; gap:28px; flex-wrap:wrap; }
     .stat { display:flex; flex-direction:column; }
     .stat .v { font-size:24px; font-weight:500; }
     .stat .k { font-size:12px; color:var(--muted); }
-    .bar { height:6px; background:#0d1220; border-radius:3px; overflow:hidden; margin-bottom:4px; min-width:110px; }
+    .bar { height:6px; background:var(--bar-bg); border-radius:3px; overflow:hidden; margin-bottom:4px; min-width:110px; }
     .bar span { display:block; height:100%; background:var(--accent); }
     .tiny { font-size:11px; color:var(--muted); opacity:.85; }
   </style>
 </head>
 <body>
   <header>
-    <h1>🐝 Vidhive</h1>
+    <span class="brand">🐝 Vidhive</span>
     <nav>
       <a href="/">Панель</a>
-      <a href="/servers">Серверы</a>
-      <a href="/library">Библиотека</a>
       <a href="/jobs">Задания</a>
-      <a href="/add">+ Загрузка</a>
+      <a href="/library">Библиотека</a>
       <a href="/docs">API</a>
     </nav>
+    <div class="head-right">
+      <button id="theme-btn" type="button" onclick="toggleTheme()" title="Тема" aria-label="Переключить тему">☀</button>
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}
   </main>
+  <script>
+    function updateThemeIcon() {
+      var b = document.getElementById("theme-btn");
+      if (!b) return;
+      var light = document.documentElement.getAttribute("data-theme") === "light";
+      b.textContent = light ? "🌙" : "☀";
+    }
+    function toggleTheme() {
+      var el = document.documentElement;
+      var next = el.getAttribute("data-theme") === "light" ? "dark" : "light";
+      el.setAttribute("data-theme", next);
+      try { localStorage.setItem("vidhive-theme", next); } catch (e) {}
+      updateThemeIcon();
+    }
+    updateThemeIcon();
+  </script>
 </body>
 </html>
