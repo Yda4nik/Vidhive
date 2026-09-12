@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.api import health, jobs, workers
+from app.api import health, jobs, library, workers
 from app.core.config import get_settings
 from app.web.router import router as web_router
 
@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(jobs.router)
     app.include_router(workers.router)
+    app.include_router(library.router)
 
     # Web UI
     static_dir = Path(__file__).resolve().parent / "web" / "static"

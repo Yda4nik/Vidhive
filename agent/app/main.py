@@ -64,6 +64,17 @@ def create_app() -> FastAPI:
                 return FileResponse(candidate)
         raise HTTPException(status_code=404, detail="file not found on this agent")
 
+    @app.delete("/files/{external_id}")
+    async def delete_file(external_id: int) -> dict:
+        """Delete the stored video directory for this identifier (frees disk)."""
+        import shutil
+
+        directory = target_dir(settings.storage_path, external_id)
+        existed = directory.exists()
+        if existed:
+            shutil.rmtree(directory, ignore_errors=True)
+        return {"deleted": existed, "external_id": external_id}
+
     return app
 
 

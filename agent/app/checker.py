@@ -148,12 +148,14 @@ class Checker:
         if not info:
             return ItemResult(external_id=external_id, status=ItemStatus.NOT_FOUND)
 
+        duration = info.get("duration")
         return ItemResult(
             external_id=external_id,
             status=ItemStatus.FOUND,
             title=info.get("title"),
             download_url=info.get("webpage_url") or url,
             size_bytes=info.get("filesize") or info.get("filesize_approx"),
+            duration_seconds=int(duration) if duration else None,
             mime_type=info.get("ext"),
         )
 

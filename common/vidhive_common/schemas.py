@@ -108,6 +108,7 @@ class ItemResult(BaseModel):
     title: str | None = None
     download_url: str | None = None
     size_bytes: int | None = None
+    duration_seconds: int | None = None
     mime_type: str | None = None
     # Local path on the reporting agent once the file has been downloaded.
     storage_path: str | None = None
@@ -143,6 +144,23 @@ class ItemOut(BaseModel):
     worker: str | None = None
     last_error: str | None = None
     checked_at: datetime | None = None
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=150)
+
+
+class GroupOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    count: int = 0
+
+
+class LibraryAction(BaseModel):
+    item_ids: list[int] = Field(min_length=1)
+    group_id: int | None = None
+    on: bool = True  # for favorite: add (True) / remove (False)
 
 
 class EventOut(BaseModel):

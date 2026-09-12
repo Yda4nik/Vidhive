@@ -187,6 +187,8 @@ class MediaMetadata(Base):
     download_url: Mapped[str | None] = mapped_column(String(1000))
     mime_type: Mapped[str | None] = mapped_column(String(100))
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str | None] = mapped_column(String(100))  # e.g. kinescope, youtube
     discovered_at: Mapped[datetime] = _created()
     raw: Mapped[dict | None] = mapped_column(JSON)
 
@@ -249,3 +251,22 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     target: Mapped[str | None] = mapped_column(String(255))
     detail: Mapped[dict | None] = mapped_column(JSON)
+
+
+# --------------------------------------------------------------------------- #
+# Library groups (labels): a video may belong to several groups at once.
+# --------------------------------------------------------------------------- #
+class Group(Base):
+    __tablename__ = "groups"
+
+    id: Mapped[int] = _pk()
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), default="user", nullable=False)  # user | favorites
+    created_at: Mapped[datetime] = _created()
+
+
+class ItemGroup(Base):
+    __tablename__ = "item_groups"
+
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)

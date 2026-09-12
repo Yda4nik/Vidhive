@@ -27,7 +27,17 @@ from app.api.jobs import (
     start_job,
     stop_job,
 )
-from app.db.models import FileRecord, Item, Job, MediaMetadata, Worker, WorkerMetric
+from app.api.library import get_or_create_favorites
+from app.db.models import (
+    FileRecord,
+    Group,
+    Item,
+    ItemGroup,
+    Job,
+    MediaMetadata,
+    Worker,
+    WorkerMetric,
+)
 from app.db.session import get_session
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import JobCreate
@@ -176,9 +186,16 @@ async def dashboard_fragment(request: Request, session: AsyncSession = Depends(g
     return _page(request, "_dashboard.html", await _dashboard_context(session))
 
 
+_ACTIVE_JOB_STATES = ("validating", "running", "pausing", "paused", "stopping")
+
+
 @router.get("/jobs", response_class=HTMLResponse)
 async def jobs_page(request: Request, session: AsyncSession = Depends(get_session)):
-    jobs = (await session.execute(select(Job).order_by(Job.id.desc()))).scalars().all()
+    jobs = (
+        await session.execute(
+            select(Job).where(Job.state.in_(_ACTIVE_JOB_STATES)).order_by(Job.id.desc())
+        )
+    ).scalars().all()
     return _page(request, "jobs.html", {"jobs": list(jobs)})
 
 
@@ -218,11 +235,37 @@ async def add_submit(
     return RedirectResponse(url="/jobs", status_code=303)
 
 
+def _fmt_duration(seconds: int | None) -> str:
+    if not seconds:
+        return "—"
+    h, rem = divmod(int(seconds), 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+_SORT_COLUMNS = {
+    "date": Item.updated_at,
+    "name": MediaMetadata.title,
+    "duration": MediaMetadata.duration_seconds,
+    "size": MediaMetadata.size_bytes,
+    "server": Worker.name,
+}
+
+
 @router.get("/library", response_class=HTMLResponse)
-async def library(request: Request, q: str = "", session: AsyncSession = Depends(get_session)):
-    # The library is a catalogue of materials, not of job items: the same video
-    # picked up by two overlapping jobs must appear once. Keep the newest record
-    # for each external identifier.
+async def library(
+    request: Request,
+    q: str = "",
+    group: str = "all",
+    source: str = "",
+    sort: str = "date",
+    order: str = "desc",
+    session: AsyncSession = Depends(get_session),
+):
+    fav = await get_or_create_favorites(session)
+    await session.commit()
+
+    # Newest completed item per external identifier (a video appears once).
     latest = (
         select(func.max(Item.id).label("item_id"))
         .where(Item.status == ItemStatus.COMPLETED.value)
@@ -234,27 +277,92 @@ async def library(request: Request, q: str = "", session: AsyncSession = Depends
         .join(latest, latest.c.item_id == Item.id)
         .join(MediaMetadata, MediaMetadata.item_id == Item.id, isouter=True)
         .join(Worker, Worker.id == Item.worker_id, isouter=True)
-        .order_by(Item.updated_at.desc())
     )
+
     q = q.strip()
     if q:
         filters = [MediaMetadata.title.ilike(f"%{q}%")]
         if q.isdigit():
             filters.append(Item.external_id == int(q))
         stmt = stmt.where(or_(*filters))
+    if source:
+        stmt = stmt.where(MediaMetadata.source == source)
+
+    # Group filter: "all" = everything, "fav" = favourites, or a numeric group id.
+    filter_group_id = None
+    if group == "fav":
+        filter_group_id = fav.id
+    elif group.isdigit():
+        filter_group_id = int(group)
+    if filter_group_id is not None:
+        member = select(ItemGroup.item_id).where(ItemGroup.group_id == filter_group_id).subquery()
+        stmt = stmt.join(member, member.c.item_id == Item.id)
+
+    column = _SORT_COLUMNS.get(sort, Item.updated_at)
+    stmt = stmt.order_by(column.asc() if order == "asc" else column.desc())
 
     rows = (await session.execute(stmt)).all()
+
+    fav_ids = set(
+        (
+            await session.execute(select(ItemGroup.item_id).where(ItemGroup.group_id == fav.id))
+        ).scalars().all()
+    )
     items = [
         {
             "id": item.id,
             "external_id": item.external_id,
             "title": (meta.title if meta else None) or f"ID {item.external_id}",
             "size_bytes": meta.size_bytes if meta else None,
+            "duration": _fmt_duration(meta.duration_seconds if meta else None),
+            "source": (meta.source if meta else None) or "—",
             "worker": worker.name if worker else None,
+            "fav": item.id in fav_ids,
         }
         for item, meta, worker in rows
     ]
-    return _page(request, "library.html", {"items": items, "q": q})
+
+    # Tabs: groups with counts; distinct sources for the source dropdown.
+    all_groups = (await session.execute(select(Group).order_by(Group.id))).scalars().all()
+    groups = []
+    for g in all_groups:
+        cnt = (
+            await session.execute(
+                select(func.count()).select_from(ItemGroup).where(ItemGroup.group_id == g.id)
+            )
+        ).scalar_one()
+        groups.append({"id": g.id, "name": g.name, "kind": g.kind, "count": cnt})
+    sources = [
+        s for s in (
+            await session.execute(
+                select(MediaMetadata.source).where(MediaMetadata.source.is_not(None)).distinct()
+            )
+        ).scalars().all()
+    ]
+    total = (
+        await session.execute(
+            select(func.count(func.distinct(Item.external_id))).where(
+                Item.status == ItemStatus.COMPLETED.value
+            )
+        )
+    ).scalar_one()
+
+    return _page(
+        request,
+        "library.html",
+        {
+            "items": items,
+            "q": q,
+            "group": group,
+            "source": source,
+            "sort": sort,
+            "order": order,
+            "groups": groups,
+            "sources": sources,
+            "fav_id": fav.id,
+            "total_count": total,
+        },
+    )
 
 
 @router.get("/player/{item_id}", response_class=HTMLResponse)

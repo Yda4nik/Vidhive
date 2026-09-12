@@ -39,6 +39,22 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _source_of(url: str | None) -> str | None:
+    """Short source name from a URL host, e.g. 'kinescope' or 'youtube'."""
+    if not url:
+        return None
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    if not host:
+        return None
+    base = host.split(".")
+    # youtu.be / youtube.com -> youtube ; kinescope.io -> kinescope
+    if "youtube" in host or host == "youtu.be":
+        return "youtube"
+    return base[-2] if len(base) >= 2 else host
+
+
 async def reclaim_expired(session: AsyncSession) -> int:
     """Return chunks whose lease expired back to the queue. Returns the count."""
     result = await session.execute(
@@ -234,6 +250,8 @@ async def apply_progress(session: AsyncSession, worker: Worker, report: Progress
             meta.download_url = item.download_url
             meta.mime_type = item.mime_type
             meta.size_bytes = item.size_bytes
+            meta.duration_seconds = item.duration_seconds
+            meta.source = _source_of(item.download_url)
 
         if item.status == ItemStatus.COMPLETED and item.storage_path:
             await _record_download(session, row, worker, item)
