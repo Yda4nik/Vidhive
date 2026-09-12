@@ -9,8 +9,13 @@
   .tab .cnt { opacity:.65; font-size:11px; }
   .tab .mini { opacity:.55; cursor:pointer; padding:0 2px; }
   .tab .mini:hover { opacity:1; }
-  .toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .toolbar { display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap; margin-top:14px; }
   .toolbar select, .toolbar input[type=text] { width:auto; }
+  /* Each filter is one visual unit: its label + control, tied by an underline. */
+  .filter { display:flex; flex-direction:column; gap:5px; padding-bottom:7px;
+    border-bottom:2px solid var(--accent); }
+  .filter > label { margin:0; }
+  .filter-row { display:flex; gap:6px; align-items:center; }
   tbody tr.vid { cursor:default; user-select:none; }
   tbody tr.vid:hover { background:rgba(124,156,255,.08); }
   tbody tr.vid.selected { background:rgba(124,156,255,.20); }
@@ -45,34 +50,47 @@
   </div>
 
   <div class="toolbar">
-    <label style="margin:0">Источник</label>
-    <select onchange="setParam('source', this.value)">
-      <option value="">Все</option>
-      {% for s in sources %}<option value="{{ s }}" {{ 'selected' if source == s else '' }}>{{ s }}</option>{% endfor %}
-    </select>
+    <div class="filter">
+      <label>Источник</label>
+      <select onchange="setParam('source', this.value)">
+        <option value="">Все</option>
+        {% for s in sources %}<option value="{{ s }}" {{ 'selected' if source == s else '' }}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
 
-    <label style="margin:0">Сервер</label>
-    <select onchange="setParam('server', this.value)">
-      <option value="">Все</option>
-      {% for s in servers %}<option value="{{ s }}" {{ 'selected' if server == s else '' }}>{{ s }}</option>{% endfor %}
-    </select>
+    <div class="filter">
+      <label>Сервер</label>
+      <select onchange="setParam('server', this.value)">
+        <option value="">Все</option>
+        {% for s in servers %}<option value="{{ s }}" {{ 'selected' if server == s else '' }}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
 
-    <label style="margin:0">Сортировка</label>
-    <select onchange="setParam('sort', this.value)">
-      <option value="date"     {{ 'selected' if sort == 'date' else '' }}>по дате</option>
-      <option value="name"     {{ 'selected' if sort == 'name' else '' }}>по названию</option>
-      <option value="duration" {{ 'selected' if sort == 'duration' else '' }}>по длительности</option>
-      <option value="size"     {{ 'selected' if sort == 'size' else '' }}>по размеру</option>
-      <option value="server"   {{ 'selected' if sort == 'server' else '' }}>по серверу</option>
-    </select>
-    <span class="btn" onclick="setParam('order', '{{ 'asc' if order == 'desc' else 'desc' }}')">
-      {{ '↑ возр.' if order == 'asc' else '↓ убыв.' }}
-    </span>
+    <div class="filter">
+      <label>Сортировка</label>
+      <div class="filter-row">
+        <select onchange="setParam('sort', this.value)">
+          <option value="date"     {{ 'selected' if sort == 'date' else '' }}>по дате</option>
+          <option value="name"     {{ 'selected' if sort == 'name' else '' }}>по названию</option>
+          <option value="duration" {{ 'selected' if sort == 'duration' else '' }}>по длительности</option>
+          <option value="size"     {{ 'selected' if sort == 'size' else '' }}>по размеру</option>
+          <option value="server"   {{ 'selected' if sort == 'server' else '' }}>по серверу</option>
+        </select>
+        <span class="btn" onclick="setParam('order', '{{ 'asc' if order == 'desc' else 'desc' }}')">
+          {{ '↑ возр.' if order == 'asc' else '↓ убыв.' }}
+        </span>
+      </div>
+    </div>
 
-    <input type="text" id="q" value="{{ q }}" placeholder="поиск по названию/ID"
-           onkeydown="if(event.key==='Enter') setParam('q', this.value)">
-    <span class="btn" onclick="setParam('q', document.getElementById('q').value)">Найти</span>
-    {% if q %}<span class="btn" onclick="setParam('q','')">сброс</span>{% endif %}
+    <div class="filter">
+      <label>Поиск по названию</label>
+      <div class="filter-row">
+        <input type="text" id="q" value="{{ q }}" placeholder="название или ID"
+               onkeydown="if(event.key==='Enter') setParam('q', this.value)">
+        <span class="btn" onclick="setParam('q', document.getElementById('q').value)">Найти</span>
+        {% if q %}<span class="btn" onclick="setParam('q','')">сброс</span>{% endif %}
+      </div>
+    </div>
   </div>
 </div>
 
