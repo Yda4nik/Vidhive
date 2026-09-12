@@ -31,7 +31,7 @@
 <div class="card">
   <h2>Библиотека</h2>
 
-  <div class="tabs">
+  <div class="tabs" id="lib-tabs">
     <span class="tab {{ 'active' if group == 'all' else '' }}" onclick="setParam('group','all')">
       Все <span class="cnt">{{ total_count }}</span>
     </span>
@@ -106,6 +106,7 @@
 </div>
 
 <div class="card">
+ <div id="lib-table">
   {% if items %}
     <table>
       <thead>
@@ -136,6 +137,7 @@
       {% if q or group != 'all' or source %}Ничего не найдено по текущему фильтру.{% else %}Пока ничего не загружено.{% endif %}
     </p>
   {% endif %}
+ </div>
 </div>
 
 <script>
@@ -145,8 +147,8 @@
     location.href = u.toString();
   }
 
-  // ---- selection (click / Ctrl / Shift) ----
-  var rows = Array.prototype.slice.call(document.querySelectorAll("tr.vid"));
+  // ---- selection (click / Ctrl / Shift); survives live refreshes ----
+  var rows = [];
   var selected = new Set();
   var anchor = null;
 
@@ -157,24 +159,46 @@
   }
   function clearSel() { selected.clear(); anchor = null; renderSel(); }
 
-  rows.forEach(function (r, i) {
-    r.addEventListener("click", function (e) {
-      if (e.target.closest("a,button,select")) return;   // let controls act
-      var id = +r.dataset.id;
-      if (e.shiftKey && anchor !== null) {
-        var a = rows.findIndex(function (x) { return +x.dataset.id === anchor; });
-        var lo = Math.min(a, i), hi = Math.max(a, i);
-        if (!(e.ctrlKey || e.metaKey)) selected.clear();
-        for (var k = lo; k <= hi; k++) selected.add(+rows[k].dataset.id);
-      } else if (e.ctrlKey || e.metaKey) {
-        selected.has(id) ? selected.delete(id) : selected.add(id);
-        anchor = id;
-      } else {
-        selected.clear(); selected.add(id); anchor = id;
-      }
-      renderSel();
+  function initSelection() {
+    rows = Array.prototype.slice.call(document.querySelectorAll("tr.vid"));
+    rows.forEach(function (r, i) {
+      r.onclick = function (e) {                          // onclick: re-init never stacks handlers
+        if (e.target.closest("a,button,select")) return;  // let controls act
+        var id = +r.dataset.id;
+        if (e.shiftKey && anchor !== null) {
+          var a = rows.findIndex(function (x) { return +x.dataset.id === anchor; });
+          var lo = Math.min(a, i), hi = Math.max(a, i);
+          if (!(e.ctrlKey || e.metaKey)) selected.clear();
+          for (var k = lo; k <= hi; k++) selected.add(+rows[k].dataset.id);
+        } else if (e.ctrlKey || e.metaKey) {
+          selected.has(id) ? selected.delete(id) : selected.add(id);
+          anchor = id;
+        } else {
+          selected.clear(); selected.add(id); anchor = id;
+        }
+        renderSel();
+      };
     });
-  });
+    // Forget selections for rows that no longer exist (e.g. deleted elsewhere).
+    var present = new Set(rows.map(function (r) { return +r.dataset.id; }));
+    Array.from(selected).forEach(function (id) { if (!present.has(id)) selected.delete(id); });
+    renderSel();
+  }
+  initSelection();
+
+  // Live refresh: re-render tabs + table on a real-time event, keeping selection.
+  window.liveRefresh = function () {
+    fetch(location.pathname + location.search)
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        ["lib-tabs", "lib-table"].forEach(function (id) {
+          var nw = doc.getElementById(id), cur = document.getElementById(id);
+          if (nw && cur) cur.innerHTML = nw.innerHTML;
+        });
+        initSelection();
+      });
+  };
 
   // ---- actions ----
   function post(url, body) {

@@ -8,6 +8,7 @@ so seeking works.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.bus import bus
 
 from app.api.jobs import (
     create_job,
@@ -182,8 +185,44 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
 
 @router.get("/fragments/dashboard", response_class=HTMLResponse)
 async def dashboard_fragment(request: Request, session: AsyncSession = Depends(get_session)):
-    """Polled by HTMX so live figures refresh without a page reload."""
+    """The live dashboard body, re-fetched on a real-time event."""
     return _page(request, "_dashboard.html", await _dashboard_context(session))
+
+
+@router.get("/events/stream")
+async def events_stream(request: Request):
+    """Server-Sent Events: pushes an 'update' the instant state changes."""
+
+    async def gen():
+        q = bus.register()
+        try:
+            yield "retry: 3000\n\n"          # client reconnect backoff
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    await asyncio.wait_for(q.get(), timeout=15)
+                    yield "data: update\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"   # keep the connection open
+        finally:
+            bus.unregister(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@router.get("/fragments/jobs", response_class=HTMLResponse)
+async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_session)):
+    jobs = (
+        await session.execute(
+            select(Job).where(Job.state.in_(_ACTIVE_JOB_STATES)).order_by(Job.id.desc())
+        )
+    ).scalars().all()
+    return _page(request, "_jobs_table.html", {"jobs": list(jobs)})
 
 
 _ACTIVE_JOB_STATES = ("validating", "running", "pausing", "paused", "stopping")

@@ -13,7 +13,6 @@
       } catch (e) {}
     })();
   </script>
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <style>
     /* Dark is the default palette; light overrides via [data-theme="light"]. */
     :root { --bg:#0f1420; --card:#1a2130; --line:#2a3550; --txt:#e8edf5; --muted:#94a3b8;
@@ -96,6 +95,27 @@
       updateThemeIcon();
     }
     updateThemeIcon();
+  </script>
+
+  <script>
+    // Real-time: a persistent SSE channel. The server pushes "update" the moment
+    // state changes; the current page's liveRefresh() re-renders instantly.
+    (function () {
+      if (!window.EventSource) return;
+      var timer = null;
+      function schedule() {
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+          if (window.liveRefresh) { try { window.liveRefresh(); } catch (e) {} }
+        }, 120);  // coalesce bursts of events into one refresh
+      }
+      function connect() {
+        var es = new EventSource("/events/stream");
+        es.onmessage = schedule;
+        es.onerror = function () { /* EventSource reconnects on its own */ };
+      }
+      connect();
+    })();
   </script>
 </body>
 </html>

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Metrics must reach the UI at least once per 5 seconds (spec 18).
     heartbeat_interval: float = 5.0
     check_timeout: float = 20.0
-    progress_batch: int = 50            # identifiers per progress report / checkpoint
+    progress_batch: int = 10            # identifiers per progress report / checkpoint (finer live updates)
     enable_download: bool = True
 
     # Download: merge best separate video+audio (kinescope serves adaptive HLS),

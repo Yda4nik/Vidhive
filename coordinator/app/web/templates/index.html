@@ -2,9 +2,17 @@
 {% block title %}Vidhive — панель{% endblock %}
 {% block content %}
 
-{# Live figures refresh every 5s without a page reload (spec 18: not less than once per 5 seconds). #}
-<div id="dash" hx-get="/fragments/dashboard" hx-trigger="every 5s" hx-swap="innerHTML">
+{# Live figures pushed via SSE — the body re-renders the instant state changes. #}
+<div id="dash">
   {% include "_dashboard.html" %}
 </div>
+
+<script>
+  window.liveRefresh = function () {
+    fetch("/fragments/dashboard")
+      .then(function (r) { return r.text(); })
+      .then(function (h) { document.getElementById("dash").innerHTML = h; });
+  };
+</script>
 
 {% endblock %}
