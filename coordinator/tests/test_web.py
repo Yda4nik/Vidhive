@@ -113,6 +113,32 @@ def test_library_shows_readable_size_for_sub_megabyte_files(client):
     assert "262 144 Б" in body
 
 
+def test_library_lists_a_video_once_across_overlapping_jobs(client):
+    """Two jobs covering the same identifier must not double the catalogue."""
+    wid = client.post("/api/workers/register", json={"name": "agent-01"}).json()["id"]
+
+    for _ in range(2):
+        job = client.post(
+            "/api/jobs", json={"range_start": 7, "range_end": 7, "chunk_size": 1}
+        ).json()
+        client.post(f"/api/jobs/{job['id']}/start")
+        lease = client.post(
+            f"/api/workers/{wid}/lease", json={"worker_id": wid, "lease_seconds": 120}
+        ).json()
+        client.post(
+            f"/api/workers/{wid}/progress",
+            json={
+                "chunk_id": lease["chunk_id"],
+                "next_id": 8,
+                "items": [{"external_id": 7, "status": "completed", "title": "clip7"}],
+            },
+        )
+        client.post(f"/api/workers/{wid}/complete", json={"chunk_id": lease["chunk_id"]})
+
+    body = client.get("/library").text
+    assert body.count("clip7") == 1
+
+
 def test_player_page_embeds_the_stream(client):
     job = client.post("/api/jobs", json={"range_start": 5, "range_end": 5, "chunk_size": 1}).json()
     client.post(f"/api/jobs/{job['id']}/start")

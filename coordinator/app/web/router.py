@@ -241,11 +241,20 @@ async def add_submit(
 
 @router.get("/library", response_class=HTMLResponse)
 async def library(request: Request, q: str = "", session: AsyncSession = Depends(get_session)):
+    # The library is a catalogue of materials, not of job items: the same video
+    # picked up by two overlapping jobs must appear once. Keep the newest record
+    # for each external identifier.
+    latest = (
+        select(func.max(Item.id).label("item_id"))
+        .where(Item.status == ItemStatus.COMPLETED.value)
+        .group_by(Item.external_id)
+        .subquery()
+    )
     stmt = (
         select(Item, MediaMetadata, Worker)
+        .join(latest, latest.c.item_id == Item.id)
         .join(MediaMetadata, MediaMetadata.item_id == Item.id, isouter=True)
         .join(Worker, Worker.id == Item.worker_id, isouter=True)
-        .where(Item.status == ItemStatus.COMPLETED.value)
         .order_by(Item.updated_at.desc())
     )
     q = q.strip()
