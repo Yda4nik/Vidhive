@@ -42,13 +42,21 @@ def _default_probe(url: str) -> dict | None:
         return ydl.extract_info(url, download=False)
 
 
-def _default_download(url: str, out_template: str) -> tuple[str, dict]:
+def _default_download(
+    url: str, out_template: str, fmt: str, concurrency: int
+) -> tuple[str, dict]:
     from yt_dlp import YoutubeDL
 
     opts = {
-        "format": "best",       # best available quality
+        # Merge the best separate video+audio streams (kinescope serves adaptive
+        # HLS, so a single progressive "best" file usually does not exist).
+        "format": fmt,
+        "merge_output_format": "mp4",
         "outtmpl": out_template,
-        "continuedl": True,     # resume a partial .part download
+        "continuedl": True,                       # resume a partial .part download
+        "concurrent_fragment_downloads": concurrency,  # HLS has many small fragments
+        "retries": 3,
+        "fragment_retries": 3,
         "noplaylist": True,
         "quiet": True,
     }
@@ -156,7 +164,19 @@ class Checker:
         out_template = str(dest / "video.%(ext)s")
         url = found.download_url or self._url(external_id)
 
-        path, info = await asyncio.to_thread(self._download, url, out_template)
+        path, info = await asyncio.to_thread(
+            self._download,
+            url,
+            out_template,
+            self.settings.download_format,
+            self.settings.fragment_concurrency,
+        )
+
+        # After a merge the final file may differ from prepare_filename's guess;
+        # trust the finished file on disk (the non-.part video.*).
+        finished = [p for p in dest.glob("video.*") if p.suffix != ".part"]
+        if finished:
+            path = str(max(finished, key=lambda p: p.stat().st_size))
 
         # Persist metadata alongside the file (title kept here, not in the filename).
         try:

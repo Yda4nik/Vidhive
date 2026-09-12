@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     progress_batch: int = 50            # identifiers per progress report / checkpoint
     enable_download: bool = True
 
+    # Download: merge best separate video+audio (kinescope serves adaptive HLS),
+    # pulling the many small fragments in parallel.
+    download_format: str = "bestvideo*+bestaudio/best"
+    fragment_concurrency: int = 8
+
     # Rate limiting and retries (spec section 9).
     rate_limit_rps: float | None = None   # global checks/sec for this agent; None = unlimited
     max_retries: int = 4
