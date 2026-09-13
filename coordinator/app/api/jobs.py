@@ -1,5 +1,8 @@
 """Job management: creation, read, lifecycle transitions, items and events."""
 
+import logging
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,9 +11,11 @@ from app.db.models import Event, Item, Job, MediaMetadata, Worker
 from app.db.session import get_session
 from app.services import scheduler
 from app.services.events import log_event
-from vidhive_common.enums import JobState
+from vidhive_common.enums import ItemStatus, JobState
 from vidhive_common.ranges import RangeParseError, parse_range
-from vidhive_common.schemas import EventOut, ItemOut, JobCreate, JobOut
+from vidhive_common.schemas import Ack, EventOut, ItemOut, JobCreate, JobOut
+
+log = logging.getLogger("vidhive.jobs")
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -105,8 +110,9 @@ async def get_job(job_id: int, session: AsyncSession = Depends(get_session)) -> 
 async def start_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Job:
     job = await _get_job_or_404(session, job_id)
     _guard(job, "start")
-    if job.next_chunk_start is None:
-        job.next_chunk_start = job.range_start if job.range_start is not None else 0
+    if job.state == JobState.CREATED.value:
+        # First start: cut the work (auto-sized blocks from the job's targets).
+        await scheduler.initialize_job_chunks(session, job)
     return await _transition(session, job, "start", JobState.RUNNING)
 
 
@@ -138,6 +144,45 @@ async def retry_failed(job_id: int, session: AsyncSession = Depends(get_session)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await session.commit()
     return {"requeued": requeued}
+
+
+@router.post("/retry-all")
+async def retry_all(session: AsyncSession = Depends(get_session)) -> dict:
+    """Re-queue failed identifiers across every job."""
+    job_ids = (await session.execute(select(Job.id).order_by(Job.id))).scalars().all()
+    total = 0
+    for jid in job_ids:
+        total += await scheduler.requeue_failed_items(session, jid)
+    await session.commit()
+    return {"requeued": total}
+
+
+@router.delete("/{job_id}", response_model=Ack)
+async def delete_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Ack:
+    """Stop and remove a job together with everything it downloaded."""
+    job = await _get_job_or_404(session, job_id)
+    rows = (
+        await session.execute(
+            select(Item, Worker)
+            .join(Worker, Worker.id == Item.worker_id, isouter=True)
+            .where(Item.job_id == job_id)
+            .where(Item.status == ItemStatus.COMPLETED.value)
+        )
+    ).all()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for item, worker in rows:
+            if worker and worker.agent_url:
+                try:
+                    await client.delete(f"{worker.agent_url.rstrip('/')}/files/{item.external_id}")
+                except httpx.HTTPError as exc:
+                    log.warning("agent file delete failed for %s: %s", item.external_id, exc)
+    log_event(
+        session, component="jobs", operation="delete", result="removed", job_id=job_id,
+        message=f"job {job_id} and its files deleted",
+    )
+    await session.delete(job)  # cascades chunks/items/metadata/downloads/files/targets
+    await session.commit()
+    return Ack()
 
 
 @router.get("/{job_id}/items", response_model=list[ItemOut])

@@ -98,6 +98,8 @@ class ChunkLease(BaseModel):
     range_end: int
     next_id: int
     lease_expires_at: datetime
+    # URL template for this job's source, e.g. "https://kinescope.io/{id}".
+    target_template: str | None = None
 
     model_config = {"from_attributes": True}
 

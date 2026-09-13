@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+import math
 
 from app.core.config import get_settings
 from app.db.models import (
@@ -25,6 +27,7 @@ from app.db.models import (
     FileRecord,
     Item,
     Job,
+    JobTarget,
     MediaMetadata,
     RangeChunk,
     Worker,
@@ -53,6 +56,72 @@ def _source_of(url: str | None) -> str | None:
     if "youtube" in host or host == "youtu.be":
         return "youtube"
     return base[-2] if len(base) >= 2 else host
+
+
+_MAX_AUTO_CHUNK = 10000
+_CHUNKS_PER_WORKER = 4
+
+
+def _auto_chunk_size(span: int, workers: int) -> int:
+    """Pick a block size so all workers stay busy: aim for ~4 blocks each."""
+    target_blocks = max(1, workers * _CHUNKS_PER_WORKER)
+    return max(1, min(_MAX_AUTO_CHUNK, math.ceil(span / target_blocks)))
+
+
+async def _online_worker_count(session: AsyncSession) -> int:
+    n = (
+        await session.execute(
+            select(func.count()).select_from(Worker).where(Worker.state == "online")
+        )
+    ).scalar_one()
+    return n or 3
+
+
+async def initialize_job_chunks(session: AsyncSession, job: Job) -> None:
+    """Prepare a job's work when it first starts.
+
+    * No explicit targets (API/legacy path) -> keep lazy generation from the
+      job's own range using its chunk_size (unchanged behaviour).
+    * A single open-ended target -> lazy generation from its start.
+    * Finite targets -> pre-generate auto-sized chunks so each target (and each
+      single id) spreads across workers instead of piling onto one.
+    """
+    targets = (
+        await session.execute(select(JobTarget).where(JobTarget.job_id == job.id))
+    ).scalars().all()
+
+    if not targets:
+        if job.next_chunk_start is None:
+            job.next_chunk_start = job.range_start if job.range_start is not None else 0
+        return
+
+    numeric = [t for t in targets if t.url is None and t.range_start is not None]
+    open_ended = [t for t in numeric if t.range_end is None]
+    if open_ended:
+        t = open_ended[0]
+        job.range_start = t.range_start
+        job.range_end = None
+        job.next_chunk_start = t.range_start
+        return
+
+    workers = await _online_worker_count(session)
+    job.next_chunk_start = None  # finite: nothing generated lazily
+    for t in numeric:
+        a, b = t.range_start, t.range_end
+        if a > b:
+            a, b = b, a
+        size = _auto_chunk_size(b - a + 1, workers)
+        start = a
+        while start <= b:
+            end = min(start + size - 1, b)
+            session.add(
+                RangeChunk(
+                    job_id=job.id, range_start=start, range_end=end,
+                    next_id=start, status=ChunkStatus.PENDING.value,
+                )
+            )
+            start = end + 1
+    await session.flush()
 
 
 async def reclaim_expired(session: AsyncSession) -> int:
@@ -223,6 +292,9 @@ async def apply_progress(session: AsyncSession, worker: Worker, report: Progress
     if chunk is None:
         raise LookupError(f"chunk {report.chunk_id} not found")
 
+    job = await session.get(Job, chunk.job_id)
+    target_group_id = job.target_group_id if job else None
+
     # Move the checkpoint forward only (never backwards).
     if chunk.next_id is None or report.next_id > chunk.next_id:
         chunk.next_id = report.next_id
@@ -255,8 +327,24 @@ async def apply_progress(session: AsyncSession, worker: Worker, report: Progress
 
         if item.status == ItemStatus.COMPLETED and item.storage_path:
             await _record_download(session, row, worker, item)
+            if target_group_id is not None:
+                await _assign_group(session, row.id, target_group_id)
     await session.flush()
     return chunk
+
+
+async def _assign_group(session: AsyncSession, item_id: int, group_id: int) -> None:
+    from app.db.models import ItemGroup
+
+    exists = (
+        await session.execute(
+            select(ItemGroup.item_id)
+            .where(ItemGroup.item_id == item_id)
+            .where(ItemGroup.group_id == group_id)
+        )
+    ).first()
+    if exists is None:
+        session.add(ItemGroup(item_id=item_id, group_id=group_id))
 
 
 async def _record_download(
@@ -399,12 +487,31 @@ async def requeue_failed_items(session: AsyncSession, job_id: int, limit: int = 
 
 
 async def maybe_complete_job(session: AsyncSession, job_id: int) -> bool:
-    """Complete a finite job once its range is exhausted and no chunks remain open."""
+    """Complete a job once no work remains.
+
+    An open-ended job (lazy cursor, no upper bound) never auto-completes. For a
+    range-cursor job the range must be fully cut; for a pre-generated (finite,
+    multi-target) job it is enough that it had chunks and none remain open.
+    """
     job = await session.get(Job, job_id)
-    if job is None or job.state != JobState.RUNNING.value or job.range_end is None:
+    if job is None or job.state != JobState.RUNNING.value:
         return False
-    if job.next_chunk_start is not None and job.next_chunk_start <= job.range_end:
-        return False  # range not fully cut yet
+
+    if job.next_chunk_start is not None:
+        # Lazy-cursor job: open-ended never completes; bounded needs the range cut.
+        if job.range_end is None:
+            return False
+        if job.next_chunk_start <= job.range_end:
+            return False
+    else:
+        # Pre-generated job: it must actually have had chunks.
+        any_chunk = (
+            await session.execute(
+                select(RangeChunk.id).where(RangeChunk.job_id == job_id).limit(1)
+            )
+        ).first()
+        if any_chunk is None:
+            return False
 
     open_chunks = (
         await session.execute(

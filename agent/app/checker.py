@@ -80,8 +80,8 @@ class Checker:
         self._download = download_fn or _default_download
         self.limiter = limiter
 
-    def _url(self, external_id: int) -> str:
-        return self.settings.target_template.format(id=external_id)
+    def _url(self, external_id: int, template: str | None = None) -> str:
+        return (template or self.settings.target_template).format(id=external_id)
 
     def _backoff(self, attempt: int) -> float:
         base, cap = self.settings.retry_base_delay, self.settings.retry_max_delay
@@ -97,13 +97,14 @@ class Checker:
         except ValueError:
             return None
 
-    async def check(self, external_id: int) -> ItemResult:
+    async def check(self, external_id: int, template: str | None = None) -> ItemResult:
         """Phase 1 (status) + phase 2 (metadata) with retries. Never downloads.
 
-        Transient conditions (429, 5xx, timeout) are retried with exponential
-        backoff + jitter, honouring Retry-After, up to ``max_retries``.
+        ``template`` (from the lease) selects the source; falls back to the
+        agent's configured target. Transient conditions (429, 5xx, timeout) are
+        retried with exponential backoff + jitter, honouring Retry-After.
         """
-        url = self._url(external_id)
+        url = self._url(external_id, template)
         attempt = 0
         while True:
             if self.limiter is not None:

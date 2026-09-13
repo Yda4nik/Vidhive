@@ -117,6 +117,11 @@ class Job(Base):
     range_end: Mapped[int | None] = mapped_column(BigInteger)  # NULL => open-ended
     # Next identifier from which a brand-new chunk will be cut (the chunking cursor).
     next_chunk_start: Mapped[int | None] = mapped_column(BigInteger)
+    # Where to fetch from: kinescope | mock | youtube. Resolved from the UI source
+    # (an "auto" choice is resolved to a concrete source at creation).
+    source: Mapped[str] = mapped_column(String(20), default="kinescope", nullable=False)
+    # Optional library group new videos are filed into automatically.
+    target_group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"))
     state: Mapped[str] = mapped_column(String(20), default="created", nullable=False)
     chunk_size: Mapped[int] = mapped_column(Integer, default=5000, nullable=False)
     request_timeout_seconds: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
@@ -135,6 +140,22 @@ class JobWorker(Base):
 
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True)
     worker_id: Mapped[int] = mapped_column(ForeignKey("workers.id", ondelete="CASCADE"), primary_key=True)
+
+
+class JobTarget(Base):
+    """One input of a job: a numeric range, a single id (start==end), or a URL.
+
+    A job may have several targets. Numeric targets drive the range scan; ``url``
+    is reserved for link-based sources such as YouTube (prepared, not yet wired).
+    """
+
+    __tablename__ = "job_targets"
+
+    id: Mapped[int] = _pk()
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    range_start: Mapped[int | None] = mapped_column(BigInteger)
+    range_end: Mapped[int | None] = mapped_column(BigInteger)  # NULL + no url => open-ended
+    url: Mapped[str | None] = mapped_column(String(1000))
 
 
 class RangeChunk(Base):

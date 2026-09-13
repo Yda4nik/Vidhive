@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Worker, WorkerMetric
+from app.core.sources import template_for
+from app.db.models import Job, Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
 from app.services.events import log_event
@@ -122,6 +123,8 @@ async def lease(
     if chunk is None:
         await session.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    job = await session.get(Job, chunk.job_id)
     await session.commit()
     return ChunkLease(
         chunk_id=chunk.id,
@@ -130,6 +133,7 @@ async def lease(
         range_end=chunk.range_end,
         next_id=chunk.next_id,
         lease_expires_at=chunk.lease_expires_at,
+        target_template=template_for(job.source) if job else None,
     )
 
 

@@ -132,7 +132,9 @@ class WorkerRunner:
         while cur <= end and not self._stop.is_set():
             batch_end = min(cur + batch, end + 1)  # exclusive
             ids = range(cur, batch_end)
-            results = await asyncio.gather(*(self._handle_id(i) for i in ids))
+            results = await asyncio.gather(
+                *(self._handle_id(i, chunk.target_template) for i in ids)
+            )
             try:
                 await self.client.progress(
                     self.worker_id,
@@ -150,11 +152,11 @@ class WorkerRunner:
             except Exception as exc:  # noqa: BLE001
                 log.warning("complete failed: %s", exc)
 
-    async def _handle_id(self, external_id: int) -> ItemResult:
+    async def _handle_id(self, external_id: int, template: str | None = None) -> ItemResult:
         async with self._sem:
             self._active_checks += 1
             try:
-                result = await self.checker.check(external_id)
+                result = await self.checker.check(external_id, template)
             finally:
                 self._active_checks -= 1
 
