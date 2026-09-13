@@ -63,7 +63,7 @@
 <div class="card">
   <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px">
     <h2 style="margin:0">Активные задания</h2>
-    <div class="row" style="gap:8px">
+    <div class="row" style="gap:8px; padding-bottom:7px; border-bottom:2px solid var(--accent)">
       <select id="retry-scope" style="width:auto; max-width:220px">
         <option value="all">Все задания</option>
         {% for j in all_jobs %}<option value="{{ j.id }}">#{{ j.id }} {{ j.name or '' }}</option>{% endfor %}
