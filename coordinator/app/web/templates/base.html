@@ -109,12 +109,15 @@
           if (window.liveRefresh) { try { window.liveRefresh(); } catch (e) {} }
         }, 120);  // coalesce bursts of events into one refresh
       }
+      var es = null;
       function connect() {
-        var es = new EventSource("/events/stream");
+        es = new EventSource("/events/stream");
         es.onmessage = schedule;
         es.onerror = function () { /* EventSource reconnects on its own */ };
       }
       connect();
+      // Close the stream on navigation so its connection slot frees immediately.
+      window.addEventListener("pagehide", function () { if (es) es.close(); });
     })();
   </script>
 </body>

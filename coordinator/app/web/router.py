@@ -198,16 +198,24 @@ async def events_stream(request: Request):
 
     async def gen():
         q = bus.register()
+        idle = 0
         try:
             yield "retry: 3000\n\n"          # client reconnect backoff
             while True:
+                # Poll for a client disconnect every second so a navigated-away
+                # connection is released fast (it holds one of the browser's ~6
+                # per-host slots — lingering ones stall the next page load).
                 if await request.is_disconnected():
                     break
                 try:
-                    await asyncio.wait_for(q.get(), timeout=15)
+                    await asyncio.wait_for(q.get(), timeout=1)
                     yield "data: update\n\n"
+                    idle = 0
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"   # keep the connection open
+                    idle += 1
+                    if idle >= 15:           # keepalive roughly every 15s
+                        yield ": keepalive\n\n"
+                        idle = 0
         finally:
             bus.unregister(q)
 
