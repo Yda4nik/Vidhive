@@ -9,8 +9,10 @@
   .srcbtn.disabled { opacity:.5; cursor:not-allowed; }
   .del { background:none; border:none; cursor:pointer; font-size:20px; color:var(--bad); padding:2px 8px; border-radius:8px; }
   .del:hover { background:rgba(224,90,90,.12); }
-  #inputs .filter-row { margin-bottom:6px; }
-  #inputs input[type=text] { flex:1; }
+  #inputs .in-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  #inputs .in-row input[type=text] { flex:1; }
+  #inputs .in-row input.rf { flex:0 0 130px; }
+  #inputs .in-row .del-field { flex:0 0 auto; }
 </style>
 
 {% if error %}
@@ -99,22 +101,27 @@
   function addInput() {
     var mode = document.getElementById("mode").value;
     var box = document.getElementById("inputs");
+    var isFirst = box.children.length === 0;
     var row = document.createElement("div");
-    row.className = "filter-row";
+    row.className = "in-row";
     if (mode === "range") {
       row.innerHTML =
-        '<input type="text" name="range_from" placeholder="от" style="max-width:120px">' +
+        '<input type="text" name="range_from" class="rf" placeholder="от">' +
         '<span>–</span>' +
-        '<input type="text" name="range_to" placeholder="до (пусто = ∞)" style="max-width:170px">';
+        '<input type="text" name="range_to" placeholder="до (пусто = ∞)">';
     } else {
       var ph = mode === "link" ? "https://kinescope.io/200673499" : "200673499";
       row.innerHTML = '<input type="text" name="value" placeholder="' + ph + '">';
     }
-    var minus = document.createElement("span");
-    minus.className = "btn";
-    minus.textContent = "−";
-    minus.onclick = function () { if (box.children.length > 1) row.remove(); };
-    row.appendChild(minus);
+    if (!isFirst) {
+      // "−" only on extra fields, to the right of the input.
+      var minus = document.createElement("button");
+      minus.type = "button";
+      minus.className = "btn del-field";
+      minus.textContent = "−";
+      minus.onclick = function () { row.remove(); };
+      row.appendChild(minus);
+    }
     box.appendChild(row);
   }
 
