@@ -58,8 +58,20 @@
   </form>
 </div>
 
-<div class="card" id="jobs-live">
-  {% include "_jobs_table.html" %}
+<div class="card">
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px">
+    <h2 style="margin:0">Активные задания</h2>
+    <div class="row" style="gap:8px">
+      <select id="retry-scope" style="width:auto; max-width:220px">
+        <option value="all">Все задания</option>
+        {% for j in all_jobs %}<option value="{{ j.id }}">#{{ j.id }} {{ j.name or '' }}</option>{% endfor %}
+      </select>
+      <span class="btn" onclick="retryErrors()" style="white-space:nowrap">↻ Повторить ошибки{% if failed_count %} ({{ failed_count }}){% endif %}</span>
+    </div>
+  </div>
+  <div id="jobs-live">
+    {% include "_jobs_table.html" %}
+  </div>
 </div>
 
 <script>

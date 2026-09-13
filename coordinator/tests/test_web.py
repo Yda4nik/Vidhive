@@ -209,10 +209,11 @@ def test_player_page_embeds_the_stream(client):
 
 
 def test_jobs_fragment_renders(client):
-    client.post("/api/jobs", json={"name": "scan", "range_start": 0, "range_end": 9})
+    # The fragment is just the live table now; an active job shows up in it.
+    client.post("/add", data={"source": "mock", "mode": "id", "value": "5", "name": "livejob"})
     r = client.get("/fragments/jobs")
     assert r.status_code == 200
-    assert "Активные задания" in r.text
+    assert "livejob" in r.text
 
 
 def test_servers_page_removed(client):

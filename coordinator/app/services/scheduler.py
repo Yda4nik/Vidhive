@@ -492,8 +492,11 @@ async def maybe_complete_job(session: AsyncSession, job_id: int) -> bool:
     An open-ended job (lazy cursor, no upper bound) never auto-completes. For a
     range-cursor job the range must be fully cut; for a pre-generated (finite,
     multi-target) job it is enough that it had chunks and none remain open.
+
+    The job row is locked so concurrent chunk completions serialize — otherwise
+    each would see the others still leased and none would finish the job.
     """
-    job = await session.get(Job, job_id)
+    job = await session.get(Job, job_id, with_for_update=True)
     if job is None or job.state != JobState.RUNNING.value:
         return False
 

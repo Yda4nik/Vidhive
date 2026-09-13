@@ -284,11 +284,7 @@ async def _failed_item_count(session: AsyncSession) -> int:
 
 @router.get("/fragments/jobs", response_class=HTMLResponse)
 async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_session)):
-    return _page(request, "_jobs_table.html", {
-        "rows": await _active_job_rows(session),
-        "failed_count": await _failed_item_count(session),
-        "all_jobs": await _all_jobs_brief(session),
-    })
+    return _page(request, "_jobs_table.html", {"rows": await _active_job_rows(session)})
 
 
 async def _all_jobs_brief(session: AsyncSession) -> list[dict]:
