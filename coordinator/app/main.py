@@ -23,7 +23,11 @@ from app.web.router import router as web_router
 
 log = logging.getLogger("vidhive.coordinator")
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+# High-frequency agent polling that must NOT trigger a real-time refresh — the
+# meaningful change (progress/complete) publishes on its own.
+_NO_PUBLISH = ("/lease", "/heartbeat")
 _SWEEP_INTERVAL = 15  # seconds
+_METRICS_RETENTION_MINUTES = 30
 
 
 async def _completion_sweeper() -> None:
@@ -33,6 +37,12 @@ async def _completion_sweeper() -> None:
     last chunks finishing at once) can leave a job stuck at 100%. This sweep
     catches it.
     """
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import delete
+
+    from app.db.models import WorkerMetric
+
     while True:
         await asyncio.sleep(_SWEEP_INTERVAL)
         try:
@@ -46,13 +56,18 @@ async def _completion_sweeper() -> None:
                 for jid in running:
                     if await scheduler.maybe_complete_job(session, jid):
                         changed = True
+
+                # Bound the metrics table so its "latest per worker" query stays fast.
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=_METRICS_RETENTION_MINUTES)
+                await session.execute(
+                    delete(WorkerMetric).where(WorkerMetric.captured_at < cutoff)
+                )
+
+                await session.commit()
                 if changed:
-                    await session.commit()
                     bus.publish()
-                else:
-                    await session.rollback()
         except Exception as exc:  # noqa: BLE001 - a sweep failure must not kill the loop
-            log.debug("completion sweep failed: %s", exc)
+            log.debug("maintenance sweep failed: %s", exc)
 
 
 @asynccontextmanager
@@ -74,7 +89,11 @@ def create_app() -> FastAPI:
     async def _broadcast_changes(request: Request, call_next):
         """Push a real-time 'update' after any successful state change."""
         response = await call_next(request)
-        if request.method in _MUTATING and response.status_code < 400:
+        if (
+            request.method in _MUTATING
+            and response.status_code < 400
+            and not request.url.path.endswith(_NO_PUBLISH)
+        ):
             bus.publish()
         return response
 

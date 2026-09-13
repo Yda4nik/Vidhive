@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
@@ -88,6 +89,8 @@ class Worker(Base):
 
 class WorkerMetric(Base):
     __tablename__ = "worker_metrics"
+    # Speeds up "latest metric per worker" (worker_id filter + captured_at sort).
+    __table_args__ = (Index("ix_worker_metrics_worker_captured", "worker_id", "captured_at"),)
 
     id: Mapped[int] = _pk()
     worker_id: Mapped[int] = mapped_column(ForeignKey("workers.id", ondelete="CASCADE"), nullable=False)
