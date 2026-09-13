@@ -81,6 +81,8 @@ class Heartbeat(BaseModel):
     disk_free_gb: float | None = None
     active_checks: int = 0
     active_downloads: int = 0
+    # The chunk the agent is actively processing right now (renew only this one).
+    active_chunk_id: int | None = None
 
 
 # --------------------------------------------------------------------------- #

@@ -35,6 +35,7 @@ class WorkerRunner:
         self._stop = asyncio.Event()
         self._active_checks = 0
         self._active_downloads = 0
+        self._active_chunk_id: int | None = None
 
     # -- lifecycle ---------------------------------------------------------- #
     async def register(self) -> int:
@@ -92,7 +93,11 @@ class WorkerRunner:
             await self.process_chunk(chunk)
 
     def _collect_metrics(self) -> Heartbeat:
-        hb = Heartbeat(active_checks=self._active_checks, active_downloads=self._active_downloads)
+        hb = Heartbeat(
+            active_checks=self._active_checks,
+            active_downloads=self._active_downloads,
+            active_chunk_id=self._active_chunk_id,
+        )
         try:
             import os
 
@@ -127,7 +132,13 @@ class WorkerRunner:
         end = chunk.range_end
         batch = self.settings.progress_batch
         log.info("chunk %s: processing %s..%s", chunk.chunk_id, start, end)
+        self._active_chunk_id = chunk.chunk_id
+        try:
+            await self._process_chunk_body(chunk, start, end, batch)
+        finally:
+            self._active_chunk_id = None  # released: heartbeat stops renewing it
 
+    async def _process_chunk_body(self, chunk, start, end, batch) -> None:
         cur = start
         while cur <= end and not self._stop.is_set():
             batch_end = min(cur + batch, end + 1)  # exclusive

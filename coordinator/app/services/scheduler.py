@@ -256,14 +256,24 @@ async def lease_chunk(
     return chunk
 
 
-async def renew_worker_leases(session: AsyncSession, worker: Worker, lease_seconds: int) -> None:
-    """Heartbeat: extend every lease held by this worker and stamp liveness."""
-    await session.execute(
-        update(RangeChunk)
-        .where(RangeChunk.leased_by == worker.id)
-        .where(RangeChunk.status == ChunkStatus.LEASED.value)
-        .values(lease_expires_at=_now() + timedelta(seconds=lease_seconds))
-    )
+async def renew_worker_leases(
+    session: AsyncSession, worker: Worker, lease_seconds: int, active_chunk_id: int | None = None
+) -> None:
+    """Heartbeat: renew only the chunk the worker is actively processing.
+
+    Renewing *every* lease held by the worker keeps alive chunks it has already
+    abandoned (e.g. after a failed progress report), so they never expire and
+    the job stalls. Renewing just the active chunk lets abandoned ones expire
+    and be reclaimed.
+    """
+    if active_chunk_id is not None:
+        await session.execute(
+            update(RangeChunk)
+            .where(RangeChunk.id == active_chunk_id)
+            .where(RangeChunk.leased_by == worker.id)
+            .where(RangeChunk.status == ChunkStatus.LEASED.value)
+            .values(lease_expires_at=_now() + timedelta(seconds=lease_seconds))
+        )
     worker.last_heartbeat_at = _now()
 
 

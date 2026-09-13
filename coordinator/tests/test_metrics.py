@@ -26,6 +26,29 @@ def test_heartbeat_stores_metrics_shown_on_dashboard(client):
     assert "123.4" in r.text       # disk free rendered
 
 
+def test_heartbeat_renews_only_the_active_chunk(client, raw_sql):
+    """An abandoned chunk (not reported active) must not be kept alive by heartbeat."""
+    wid = _register(client)
+    client.post("/add", data={"source": "mock", "mode": "id", "value": "5", "name": "x"})
+    lease = client.post(
+        f"/api/workers/{wid}/lease", json={"worker_id": wid, "lease_seconds": 30}
+    ).json()
+    cid = lease["chunk_id"]
+
+    def expiry():
+        return raw_sql("SELECT lease_expires_at FROM range_chunks WHERE id=?", (cid,))[0][0]
+
+    exp0 = expiry()
+    # Heartbeat without naming the chunk -> its lease is NOT renewed (can expire).
+    client.post(f"/api/workers/{wid}/heartbeat", params={"lease_seconds": 300}, json={})
+    assert expiry() == exp0
+    # Heartbeat naming the chunk as active -> lease pushed further out.
+    client.post(
+        f"/api/workers/{wid}/heartbeat", params={"lease_seconds": 300}, json={"active_chunk_id": cid}
+    )
+    assert expiry() > exp0
+
+
 def test_progress_is_idempotent(client, raw_sql):
     job = client.post("/api/jobs", json={"range_start": 5, "range_end": 5, "chunk_size": 1}).json()
     client.post(f"/api/jobs/{job['id']}/start")

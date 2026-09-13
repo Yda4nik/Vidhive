@@ -89,7 +89,7 @@ async def heartbeat(
 ) -> Ack:
     worker = await _get_worker_or_404(session, worker_id)
     worker.state = WorkerState.ONLINE.value
-    await scheduler.renew_worker_leases(session, worker, lease_seconds)
+    await scheduler.renew_worker_leases(session, worker, lease_seconds, payload.active_chunk_id)
 
     # Store a metrics sample if the heartbeat carried resource data.
     if any(
