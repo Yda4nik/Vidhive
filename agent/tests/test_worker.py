@@ -14,7 +14,7 @@ class FakeChecker:
     def __init__(self):
         self.downloaded = []
 
-    async def check(self, external_id):
+    async def check(self, external_id, template=None):
         found = external_id % 2 == 0  # even ids "have" a video
         return ItemResult(
             external_id=external_id,

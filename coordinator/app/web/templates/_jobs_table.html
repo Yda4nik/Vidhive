@@ -1,34 +1,47 @@
-<h2>Активные задания</h2>
-{% if jobs %}
+<div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px">
+  <h2 style="margin:0">Активные задания</h2>
+  <div class="filter-row">
+    <select id="retry-scope">
+      <option value="all">Все задания</option>
+      {% for j in all_jobs %}<option value="{{ j.id }}">#{{ j.id }} {{ j.name or '' }}</option>{% endfor %}
+    </select>
+    <span class="btn" onclick="retryErrors()">↻ Повторить ошибки{% if failed_count %} ({{ failed_count }}){% endif %}</span>
+  </div>
+</div>
+
+{% if rows %}
   <table>
     <thead>
-      <tr><th>ID</th><th>Название</th><th>Диапазон</th><th>Состояние</th><th>Действия</th></tr>
+      <tr><th>ID</th><th>Название</th><th>Источник</th><th>Прогресс</th><th>Скорость</th><th>Загружено</th><th>Состояние</th><th></th></tr>
     </thead>
     <tbody>
-      {% for job in jobs %}
+      {% for r in rows %}
+      {% set job = r.job %}
       <tr>
         <td>{{ job.id }}</td>
         <td>{{ job.name or "—" }}</td>
-        <td>{{ job.range_start }}–{{ job.range_end if job.range_end is not none else "∞" }}</td>
+        <td class="muted">{{ job.source }}</td>
+        <td style="min-width:160px">
+          {% if r.percent is not none %}
+            <div class="bar"><span style="width:{{ r.percent }}%"></span></div>
+            <span class="muted tiny">{{ r.processed }} / {{ r.total }} ({{ r.percent }}%)</span>
+          {% else %}
+            <span class="muted tiny">{{ r.processed }} / ∞</span>
+          {% endif %}
+        </td>
+        <td class="muted">{{ r.speed }} ID/с</td>
+        <td class="muted">{{ r.downloaded }}</td>
         <td>
-          {% set cls = 'run' if job.state == 'running' else ('ok' if job.state in ('completed',) else 'bad' if job.state in ('failed','stopped') else '') %}
+          {% set cls = 'run' if job.state == 'running' else ('bad' if job.state in ('paused','pausing','stopping') else '') %}
           <span class="pill {{ cls }}">{{ job.state }}</span>
         </td>
-        <td>
-          <div class="actions">
-            {% if job.state in ('created','paused','stopped') %}
-              <form class="inline" method="post" action="/jobs/{{ job.id }}/start"><button class="btn">▶ старт</button></form>
-            {% endif %}
-            {% if job.state == 'running' %}
-              <form class="inline" method="post" action="/jobs/{{ job.id }}/pause"><button class="btn">⏸ пауза</button></form>
-              <form class="inline" method="post" action="/jobs/{{ job.id }}/stop"><button class="btn">⏹ стоп</button></form>
-            {% endif %}
-            {% if job.state == 'paused' %}
-              <form class="inline" method="post" action="/jobs/{{ job.id }}/resume"><button class="btn">▶ продолжить</button></form>
-              <form class="inline" method="post" action="/jobs/{{ job.id }}/stop"><button class="btn">⏹ стоп</button></form>
-            {% endif %}
-            <form class="inline" method="post" action="/jobs/{{ job.id }}/retry"><button class="btn">↻ повторить ошибки</button></form>
-          </div>
+        <td style="white-space:nowrap">
+          {% if job.state == 'running' %}
+            <form class="inline" method="post" action="/jobs/{{ job.id }}/pause"><button class="btn">⏸ пауза</button></form>
+          {% elif job.state == 'paused' %}
+            <form class="inline" method="post" action="/jobs/{{ job.id }}/resume"><button class="btn">▶ продолжить</button></form>
+          {% endif %}
+          <button class="del" title="Удалить задание и его видео" onclick="deleteJob({{ job.id }})">🗑</button>
         </td>
       </tr>
       {% endfor %}

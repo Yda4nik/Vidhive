@@ -20,25 +20,70 @@ def test_dashboard_empty_state(client):
 
 
 def test_add_range_creates_and_starts_job(client):
-    r = client.post("/add", data={"mode": "range", "value": "[0,50]", "name": "scan", "chunk_size": "10"})
+    r = client.post(
+        "/add",
+        data={"source": "mock", "mode": "range", "range_from": "0", "range_to": "50", "name": "scan"},
+    )
     assert r.status_code == 200          # followed redirect to /jobs
     assert "scan" in r.text
     assert "running" in r.text           # job was started
 
 
-def test_add_single_id_from_url(client):
+def test_add_link_creates_job(client):
     r = client.post(
-        "/add", data={"mode": "single", "value": "http://kinescope.io/200673499", "name": ""}
+        "/add",
+        data={"source": "kinescope", "mode": "link", "value": "http://kinescope.io/200673499"},
     )
     assert r.status_code == 200
-    assert "200673499" in r.text
+    assert "running" in r.text
+
+
+def test_add_ids_spread_into_separate_blocks(client, raw_sql):
+    # Three explicit ids -> three single-id blocks (so they can spread over agents).
+    r = client.post(
+        "/add", data={"source": "mock", "mode": "id", "value": ["10", "20", "30"], "name": "three"}
+    )
+    assert r.status_code == 200
+    chunks = raw_sql(
+        "SELECT c.range_start, c.range_end FROM range_chunks c JOIN jobs j ON j.id=c.job_id "
+        "WHERE j.name='three' ORDER BY c.range_start"
+    )
+    assert chunks == [(10, 10), (20, 20), (30, 30)]
+
+
+def test_add_incompatible_combo_shows_error(client):
+    r = client.post("/add", data={"source": "mock", "mode": "link", "value": "http://x/1"})
+    assert r.status_code == 200
+    assert "не поддерживает" in r.text
 
 
 def test_job_action_pause(client):
-    client.post("/add", data={"mode": "range", "value": "[0,50]", "name": "scan", "chunk_size": "10"})
+    client.post("/add", data={"source": "mock", "mode": "id", "value": "5", "name": "scan"})
     r = client.post("/jobs/1/pause")
     assert r.status_code == 200
     assert "paused" in r.text
+
+
+def test_delete_job(client, raw_sql):
+    client.post("/add", data={"source": "mock", "mode": "id", "value": "7", "name": "gone"})
+    jid = raw_sql("SELECT id FROM jobs WHERE name='gone'")[0][0]
+    assert client.request("DELETE", f"/api/jobs/{jid}").status_code == 200
+    assert raw_sql("SELECT COUNT(*) FROM jobs WHERE id=?", (jid,))[0][0] == 0
+
+
+def test_retry_all_endpoint(client):
+    r = client.post("/api/jobs/retry-all")
+    assert r.status_code == 200
+    assert "requeued" in r.json()
+
+
+def test_job_creates_into_target_group(client, raw_sql):
+    gid = client.post("/api/groups", json={"name": "Курс"}).json()["id"]
+    client.post(
+        "/add", data={"source": "mock", "mode": "id", "value": "5", "name": "g", "group_id": str(gid)},
+    )
+    jid = raw_sql("SELECT id FROM jobs WHERE name='g'")[0][0]
+    assert raw_sql("SELECT target_group_id FROM jobs WHERE id=?", (jid,))[0][0] == gid
 
 
 def test_dashboard_shows_progress_speed_and_active_downloads(client):

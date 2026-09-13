@@ -12,6 +12,7 @@ import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -31,12 +32,14 @@ from app.api.jobs import (
     stop_job,
 )
 from app.api.library import get_or_create_favorites
+from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
     FileRecord,
     Group,
     Item,
     ItemGroup,
     Job,
+    JobTarget,
     MediaMetadata,
     Worker,
     WorkerMetric,
@@ -215,27 +218,96 @@ async def events_stream(request: Request):
     )
 
 
-@router.get("/fragments/jobs", response_class=HTMLResponse)
-async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_session)):
-    jobs = (
-        await session.execute(
-            select(Job).where(Job.state.in_(_ACTIVE_JOB_STATES)).order_by(Job.id.desc())
-        )
-    ).scalars().all()
-    return _page(request, "_jobs_table.html", {"jobs": list(jobs)})
-
-
 _ACTIVE_JOB_STATES = ("validating", "running", "pausing", "paused", "stopping")
 
 
-@router.get("/jobs", response_class=HTMLResponse)
-async def jobs_page(request: Request, session: AsyncSession = Depends(get_session)):
+async def _active_job_rows(session: AsyncSession) -> list[dict]:
+    """Active jobs with per-job progress (processed / total, %, speed, downloaded)."""
     jobs = (
         await session.execute(
             select(Job).where(Job.state.in_(_ACTIVE_JOB_STATES)).order_by(Job.id.desc())
         )
     ).scalars().all()
-    return _page(request, "jobs.html", {"jobs": list(jobs)})
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_SPEED_WINDOW_SECONDS)
+    rows = []
+    for job in jobs:
+        targets = (
+            await session.execute(select(JobTarget).where(JobTarget.job_id == job.id))
+        ).scalars().all()
+        if targets:
+            spans = [t for t in targets if t.range_start is not None and t.range_end is not None]
+            open_ended = any(t.range_end is None for t in targets)
+            total = None if open_ended else sum(t.range_end - t.range_start + 1 for t in spans) or None
+        elif job.range_end is not None and job.range_start is not None:
+            total = job.range_end - job.range_start + 1
+        else:
+            total = None
+        processed = (
+            await session.execute(
+                select(func.count()).select_from(Item)
+                .where(Item.job_id == job.id).where(Item.status.not_in(_OPEN_STATUSES))
+            )
+        ).scalar_one()
+        downloaded = (
+            await session.execute(
+                select(func.count()).select_from(Item)
+                .where(Item.job_id == job.id).where(Item.status == ItemStatus.COMPLETED.value)
+            )
+        ).scalar_one()
+        recent = (
+            await session.execute(
+                select(func.count()).select_from(Item)
+                .where(Item.job_id == job.id)
+                .where(Item.checked_at.is_not(None)).where(Item.checked_at >= cutoff)
+            )
+        ).scalar_one()
+        rows.append({
+            "job": job,
+            "total": total,
+            "processed": processed,
+            "downloaded": downloaded,
+            "percent": round(processed * 100 / total, 1) if total else None,
+            "speed": round(recent / _SPEED_WINDOW_SECONDS, 2),
+        })
+    return rows
+
+
+async def _failed_item_count(session: AsyncSession) -> int:
+    return (
+        await session.execute(
+            select(func.count()).select_from(Item).where(
+                Item.status.in_(("failed", "rate_limited", "retry_wait"))
+            )
+        )
+    ).scalar_one()
+
+
+@router.get("/fragments/jobs", response_class=HTMLResponse)
+async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_session)):
+    return _page(request, "_jobs_table.html", {
+        "rows": await _active_job_rows(session),
+        "failed_count": await _failed_item_count(session),
+        "all_jobs": await _all_jobs_brief(session),
+    })
+
+
+async def _all_jobs_brief(session: AsyncSession) -> list[dict]:
+    jobs = (await session.execute(select(Job).order_by(Job.id.desc()))).scalars().all()
+    return [{"id": j.id, "name": j.name} for j in jobs]
+
+
+@router.get("/jobs", response_class=HTMLResponse)
+async def jobs_page(request: Request, error: str = "", session: AsyncSession = Depends(get_session)):
+    groups = (
+        await session.execute(select(Group).where(Group.kind == "user").order_by(Group.id))
+    ).scalars().all()
+    return _page(request, "jobs.html", {
+        "rows": await _active_job_rows(session),
+        "failed_count": await _failed_item_count(session),
+        "all_jobs": await _all_jobs_brief(session),
+        "groups": [{"id": g.id, "name": g.name} for g in groups],
+        "error": error,
+    })
 
 
 @router.post("/jobs/{job_id}/{action}")
@@ -250,26 +322,91 @@ async def job_action(job_id: int, action: str, session: AsyncSession = Depends(g
     return RedirectResponse(url="/jobs", status_code=303)
 
 
+def _build_targets(source, mode, values, range_from, range_to):
+    """Return (resolved_source, [(range_start, range_end, url), ...]) or raise ValueError."""
+    values = [v.strip() for v in values if v.strip()]
+    targets: list[tuple] = []
+
+    if source == "youtube":
+        raise ValueError("YouTube пока не поддерживается")
+    if source in SUPPORTED_MODES and mode not in SUPPORTED_MODES[source]:
+        raise ValueError(f"Источник «{source}» не поддерживает режим «{mode}»")
+
+    if mode == "id":
+        if source not in NUMERIC_SOURCES:
+            raise ValueError("Для режима «id» выберите источник kinescope или mock")
+        for v in values:
+            if not v.isdigit():
+                raise ValueError(f"«{v}» — это не число")
+            targets.append((int(v), int(v), None))
+        resolved = source
+
+    elif mode == "range":
+        if source not in NUMERIC_SOURCES:
+            raise ValueError("Диапазон работает с kinescope или mock")
+        pairs = list(zip(range_from, range_to))
+        for f, t in pairs:
+            f, t = f.strip(), t.strip()
+            if not f and not t:
+                continue
+            a = int(f) if f.isdigit() else 0
+            b = int(t) if t.isdigit() else None
+            if b is not None and b < a:
+                raise ValueError(f"В диапазоне {a}–{t} конец меньше начала")
+            targets.append((a, b, None))
+        resolved = source
+
+    elif mode == "link":
+        resolved = None
+        for url in values:
+            src = source if source != "auto" else (source_from_url(url) or "")
+            if src == "youtube":
+                raise ValueError("YouTube пока не поддерживается")
+            if src != "kinescope":
+                raise ValueError(f"Не удалось определить источник для «{url}»")
+            match = _KINESCOPE_ID.search(url)
+            if not match:
+                raise ValueError(f"В ссылке «{url}» нет числового ID")
+            ident = int(match.group(1))
+            targets.append((ident, ident, None))
+            resolved = "kinescope"
+    else:
+        raise ValueError(f"Неизвестный режим «{mode}»")
+
+    if not targets:
+        raise ValueError("Заполните хотя бы одно поле ввода")
+    open_ended = [t for t in targets if t[1] is None]
+    if open_ended and len(targets) > 1:
+        raise ValueError("Бесконечный диапазон должен быть единственной целью")
+    return resolved, targets
+
+
 @router.post("/add")
 async def add_submit(
-    mode: str = Form(...),
-    value: str = Form(""),
+    source: str = Form("auto"),
+    mode: str = Form("link"),
+    value: list[str] = Form(default=[]),
+    range_from: list[str] = Form(default=[]),
+    range_to: list[str] = Form(default=[]),
     name: str = Form(""),
-    chunk_size: int = Form(5000),
+    group_id: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
-    if mode == "single":
-        match = _KINESCOPE_ID.search(value or "")
-        if not match:
-            raise HTTPException(status_code=422, detail="не найден числовой ID в значении")
-        ident = int(match.group(1))
-        payload = JobCreate(
-            name=name or f"single {ident}", range_start=ident, range_end=ident, chunk_size=1
-        )
-    else:  # range
-        payload = JobCreate(name=name or None, range_spec=value or "", chunk_size=chunk_size)
+    try:
+        resolved_source, targets = _build_targets(source, mode, value, range_from, range_to)
+    except ValueError as exc:
+        return RedirectResponse(url=f"/jobs?error={quote(str(exc))}", status_code=303)
 
-    job = await create_job(payload, session)
+    job = Job(
+        name=name.strip() or None,
+        source=resolved_source,
+        target_group_id=int(group_id) if group_id.isdigit() else None,
+    )
+    session.add(job)
+    await session.flush()
+    for a, b, url in targets:
+        session.add(JobTarget(job_id=job.id, range_start=a, range_end=b, url=url))
+    await session.commit()
     await start_job(job.id, session)
     return RedirectResponse(url="/jobs", status_code=303)
 

@@ -1,43 +1,61 @@
 {% extends "base.html" %}
 {% block title %}Vidhive — задания{% endblock %}
 {% block content %}
+<style>
+  .srcbtns { display:flex; gap:8px; flex-wrap:wrap; }
+  .srcbtn { padding:6px 14px; border-radius:8px; border:1px solid var(--line); background:var(--btn-bg);
+    color:var(--txt); cursor:pointer; font-size:13px; }
+  .srcbtn.active { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+  .srcbtn.disabled { opacity:.5; cursor:not-allowed; }
+  .del { background:none; border:none; cursor:pointer; font-size:20px; color:var(--bad); padding:2px 8px; border-radius:8px; }
+  .del:hover { background:rgba(224,90,90,.12); }
+  #inputs .filter-row { margin-bottom:6px; }
+  #inputs input[type=text] { flex:1; }
+</style>
+
+{% if error %}
+<div class="card" style="border-color:var(--bad)">
+  <span style="color:var(--bad)">⚠ {{ error }}</span>
+</div>
+{% endif %}
 
 <div class="card">
-  <details open>
-    <summary style="cursor:pointer; font-size:16px; font-weight:600; list-style:none">➕ Добавить загрузку</summary>
-    <form method="post" action="/add" style="margin-top:12px">
-      <div class="row" style="align-items:flex-end; flex-wrap:wrap">
-        <div style="flex:2; min-width:240px">
-          <label>Что скачать</label>
-          <input type="text" name="value" placeholder="[0,500000]  ·  200673499  ·  https://kinescope.io/200673499">
-        </div>
-        <div style="flex:1; min-width:150px">
-          <label>Режим</label>
-          <select name="mode">
-            <option value="range">Диапазон</option>
-            <option value="single">Один ID / ссылка</option>
-          </select>
-        </div>
-        <div style="flex:1; min-width:110px">
-          <label>Размер блока</label>
-          <input type="number" name="chunk_size" value="5000" min="1">
-        </div>
-      </div>
-      <div class="row" style="align-items:flex-end; flex-wrap:wrap; margin-top:4px">
-        <div style="flex:2; min-width:240px">
-          <label>Название (необязательно)</label>
-          <input type="text" name="name" placeholder="например, вебинары по матанализу">
-        </div>
-        <div style="flex:1; min-width:150px">
-          <input type="submit" class="btn primary" value="Создать и запустить" style="width:100%">
-        </div>
-      </div>
-    </form>
-    <p class="muted tiny" style="margin-top:10px">
-      Диапазон: <code>[A,B]</code> — от A до B, <code>A</code> — от 0 до A, <code>[A,]</code> — от A без конца, пусто — с 0 без конца.
-      «Один ID / ссылка» создаёт задание на одну запись.
-    </p>
-  </details>
+  <h2>Добавить загрузку</h2>
+  <form method="post" action="/add" id="add-form">
+    <input type="hidden" name="source" id="src" value="auto">
+
+    <label>Источник</label>
+    <div class="srcbtns">
+      <span class="srcbtn active" data-src="auto">Авто</span>
+      <span class="srcbtn" data-src="kinescope">kinescope</span>
+      <span class="srcbtn" data-src="mock">mock</span>
+      <span class="srcbtn disabled" data-src="youtube" title="скоро">youtube</span>
+    </div>
+
+    <label>Режим</label>
+    <select id="mode" name="mode">
+      <option value="link">ссылка</option>
+      <option value="id">id</option>
+      <option value="range">диапазон</option>
+    </select>
+
+    <label>Что скачать</label>
+    <div id="inputs"></div>
+    <span class="btn" onclick="addInput()">＋ ещё поле</span>
+
+    <label>Название (необязательно)</label>
+    <input type="text" name="name" placeholder="например, вебинары по матанализу">
+
+    <label>Папка</label>
+    <select name="group_id">
+      <option value="">Все</option>
+      {% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+    </select>
+
+    <div style="margin-top:16px">
+      <input type="submit" class="btn primary" value="Создать и запустить">
+    </div>
+  </form>
 </div>
 
 <div class="card" id="jobs-live">
@@ -45,7 +63,70 @@
 </div>
 
 <script>
-  // Live: refresh the jobs table the instant the server signals a change.
+  var SUPPORTED = { auto: ["link"], kinescope: ["id", "range", "link"], mock: ["id", "range"], youtube: ["link"] };
+
+  function currentSource() { return document.getElementById("src").value; }
+  function setSource(src) {
+    document.getElementById("src").value = src;
+    document.querySelectorAll(".srcbtn").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.src === src);
+    });
+    refreshModes();
+  }
+  function refreshModes() {
+    var allowed = SUPPORTED[currentSource()] || ["link"];
+    var sel = document.getElementById("mode");
+    Array.prototype.forEach.call(sel.options, function (o) { o.disabled = allowed.indexOf(o.value) < 0; });
+    if (allowed.indexOf(sel.value) < 0) sel.value = allowed[0];
+    renderInputs();
+  }
+  function renderInputs() {
+    document.getElementById("inputs").innerHTML = "";
+    addInput();
+  }
+  function addInput() {
+    var mode = document.getElementById("mode").value;
+    var box = document.getElementById("inputs");
+    var row = document.createElement("div");
+    row.className = "filter-row";
+    if (mode === "range") {
+      row.innerHTML =
+        '<input type="text" name="range_from" placeholder="от" style="max-width:120px">' +
+        '<span>–</span>' +
+        '<input type="text" name="range_to" placeholder="до (пусто = ∞)" style="max-width:170px">';
+    } else {
+      var ph = mode === "link" ? "https://kinescope.io/200673499" : "200673499";
+      row.innerHTML = '<input type="text" name="value" placeholder="' + ph + '">';
+    }
+    var minus = document.createElement("span");
+    minus.className = "btn";
+    minus.textContent = "−";
+    minus.onclick = function () { if (box.children.length > 1) row.remove(); };
+    row.appendChild(minus);
+    box.appendChild(row);
+  }
+
+  document.querySelectorAll(".srcbtn").forEach(function (b) {
+    b.onclick = function () {
+      if (b.classList.contains("disabled")) { alert("YouTube пока в разработке"); return; }
+      setSource(b.dataset.src);
+    };
+  });
+  document.getElementById("mode").onchange = renderInputs;
+  refreshModes();
+
+  // ---- active-jobs controls (defined here so they survive live refreshes) ----
+  function retryErrors() {
+    var scope = document.getElementById("retry-scope").value;
+    var url = scope === "all" ? "/api/jobs/retry-all" : "/api/jobs/" + scope + "/retry";
+    fetch(url, { method: "POST" }).then(function (r) { if (!r.ok) alert("Ошибка: " + r.status); });
+  }
+  function deleteJob(id) {
+    if (!confirm("Удалить задание #" + id + " и все скачанные им видео?")) return;
+    fetch("/api/jobs/" + id, { method: "DELETE" }).then(function (r) { if (!r.ok) alert("Ошибка: " + r.status); });
+  }
+
+  // ---- live refresh of the jobs table ----
   window.liveRefresh = function () {
     fetch("/fragments/jobs")
       .then(function (r) { return r.text(); })

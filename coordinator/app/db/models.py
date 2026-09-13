@@ -132,7 +132,9 @@ class Job(Base):
     created_at: Mapped[datetime] = _created()
     updated_at: Mapped[datetime] = _updated()
 
-    chunks: Mapped[list[RangeChunk]] = relationship(back_populates="job")
+    # passive_deletes: let the DB's ON DELETE CASCADE remove chunks, instead of
+    # the ORM trying to null out range_chunks.job_id (which is NOT NULL).
+    chunks: Mapped[list[RangeChunk]] = relationship(back_populates="job", passive_deletes=True)
 
 
 class JobWorker(Base):
