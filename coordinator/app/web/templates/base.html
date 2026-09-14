@@ -71,6 +71,7 @@
       <a href="/">Панель</a>
       <a href="/jobs">Задания</a>
       <a href="/library">Библиотека</a>
+      {% if request.state.role == 'administrator' %}<a href="/users">Пользователи</a>{% endif %}
       <a href="/docs" target="_blank" rel="noopener">API</a>
     </nav>
     <div class="head-right" style="gap:10px; align-items:center">

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — пользователи{% endblock %}
+{% block content %}
+{% if error %}<div class="card" style="border-color:var(--bad)"><span style="color:var(--bad)">⚠ {{ error }}</span></div>{% endif %}
+
+<div class="card">
+  <h2>Добавить пользователя</h2>
+  <form method="post" action="/users" class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-end">
+    <div><label>Логин</label><input type="text" name="username" required></div>
+    <div><label>Пароль</label><input type="password" name="password" required></div>
+    <div><label>Роль</label>
+      <select name="role">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
+    </div>
+    <input type="submit" class="btn primary" value="Создать">
+  </form>
+</div>
+
+<div class="card">
+  <h2>Пользователи</h2>
+  <table>
+    <thead><tr><th>Логин</th><th>Роль</th><th>Действия</th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td>{{ u.username }}</td>
+        <td>
+          <form method="post" action="/users/{{ u.id }}/role" class="inline">
+            <select name="role" onchange="this.form.submit()">
+              {% for r in roles %}<option value="{{ r }}" {{ 'selected' if u.role == r else '' }}>{{ r }}</option>{% endfor %}
+            </select>
+          </form>
+        </td>
+        <td style="white-space:nowrap">
+          <form method="post" action="/users/{{ u.id }}/password" class="inline"
+                onsubmit="this.pw.value=prompt('Новый пароль для {{ u.username }}')||''; return !!this.pw.value">
+            <input type="hidden" name="password" class="pw">
+            <span class="btn" onclick="this.closest('form').requestSubmit()">Сбросить пароль</span>
+          </form>
+          <form method="post" action="/users/{{ u.id }}/delete" class="inline"
+                onsubmit="return confirm('Удалить пользователя {{ u.username }}?')">
+            <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="🗑">
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

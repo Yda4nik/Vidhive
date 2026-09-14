@@ -33,9 +33,9 @@ from app.api.jobs import (
 )
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
-from app.db.models import User
-from app.services.auth import require_role, role_of
-from app.services.security import verify_password
+from app.db.models import RoleModel, User, UserRole
+from app.services.auth import ROLE_RANK, require_role, role_of
+from app.services.security import hash_password, verify_password
 from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
     FileRecord,
@@ -294,6 +294,98 @@ async def login_submit(
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
+
+
+async def _users_context(session: AsyncSession) -> dict:
+    users = (await session.execute(select(User).order_by(User.username))).scalars().all()
+    rows = [{"id": u.id, "username": u.username, "role": await role_of(session, u.id)} for u in users]
+    return {"users": rows, "roles": list(ROLE_RANK.keys())}
+
+
+async def _admin_count(session: AsyncSession) -> int:
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(UserRole)
+            .join(RoleModel, RoleModel.id == UserRole.role_id)
+            .where(RoleModel.name == "administrator")
+        )
+    ).scalar_one()
+
+
+async def _set_role(session: AsyncSession, user_id: int, role: str) -> None:
+    await session.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
+    rid = (await session.execute(select(RoleModel.id).where(RoleModel.name == role))).scalar_one()
+    session.add(UserRole(user_id=user_id, role_id=rid))
+
+
+@router.get("/users", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("administrator"))])
+async def users_page(request: Request, error: str = "", session: AsyncSession = Depends(get_session)):
+    ctx = await _users_context(session)
+    ctx["error"] = error
+    return _page(request, "users.html", ctx)
+
+
+@router.post("/users", dependencies=[Depends(require_role("administrator"))])
+async def users_create(
+    username: str = Form(...), password: str = Form(...), role: str = Form("viewer"),
+    session: AsyncSession = Depends(get_session),
+):
+    if role not in ROLE_RANK:
+        return RedirectResponse("/users?error=неизвестная+роль", status_code=303)
+    exists = (
+        await session.execute(select(User).where(User.username == username))
+    ).scalar_one_or_none()
+    if exists is not None:
+        return RedirectResponse("/users?error=логин+занят", status_code=303)
+    user = User(username=username, password_hash=hash_password(password))
+    session.add(user)
+    await session.flush()
+    await _set_role(session, user.id, role)
+    await session.commit()
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/role", dependencies=[Depends(require_role("administrator"))])
+async def users_set_role(
+    user_id: int, role: str = Form(...), session: AsyncSession = Depends(get_session)
+):
+    if role not in ROLE_RANK:
+        return RedirectResponse("/users?error=неизвестная+роль", status_code=303)
+    current = await role_of(session, user_id)
+    if current == "administrator" and role != "administrator" and await _admin_count(session) <= 1:
+        return RedirectResponse("/users?error=нельзя+снять+последнего+админа", status_code=303)
+    await _set_role(session, user_id, role)
+    await session.commit()
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/password", dependencies=[Depends(require_role("administrator"))])
+async def users_set_password(
+    user_id: int, password: str = Form(...), session: AsyncSession = Depends(get_session)
+):
+    user = await session.get(User, user_id)
+    if user is not None:
+        user.password_hash = hash_password(password)
+        await session.commit()
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/{user_id}/delete", dependencies=[Depends(require_role("administrator"))])
+async def users_delete(
+    request: Request, user_id: int, session: AsyncSession = Depends(get_session)
+):
+    me = request.state.user
+    if me is not None and me.id == user_id:
+        return RedirectResponse("/users?error=нельзя+удалить+себя", status_code=303)
+    if await role_of(session, user_id) == "administrator" and await _admin_count(session) <= 1:
+        return RedirectResponse("/users?error=нельзя+удалить+последнего+админа", status_code=303)
+    user = await session.get(User, user_id)
+    if user is not None:
+        await session.delete(user)
+        await session.commit()
+    return RedirectResponse("/users", status_code=303)
 
 
 @router.get("/events/stream", dependencies=[Depends(require_role("viewer"))])
