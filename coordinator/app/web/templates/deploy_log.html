@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — развёртывание{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px">
+    <h2 style="margin:0">
+      {{ 'Снос' if dep.kind == 'teardown' else 'Развёртывание' }} · {{ dep.target }}
+      <span class="pill" id="status"
+            style="margin-left:8px">{{ dep.status }}</span>
+    </h2>
+    <a class="btn" href="/servers">← к серверам</a>
+  </div>
+  <pre id="log" style="background:var(--bar-bg); border:1px solid var(--line); border-radius:8px;
+    padding:12px; overflow:auto; max-height:60vh; white-space:pre-wrap; font-size:12px; margin:0">{% for l in dep.lines %}{{ l }}
+{% endfor %}</pre>
+</div>
+
+<script>
+  var DEP = "{{ dep.id }}";
+  var pre = document.getElementById("log");
+  var badge = document.getElementById("status");
+  function paint(status) {
+    badge.textContent = status;
+    badge.className = "pill " + (status === "success" ? "ok" : status === "error" ? "bad" : "run");
+  }
+  paint("{{ dep.status }}");
+  function poll() {
+    fetch("/servers/deploy/" + DEP + "/log")
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        pre.textContent = d.lines.join("\n");
+        pre.scrollTop = pre.scrollHeight;
+        paint(d.status);
+        if (d.status === "running") setTimeout(poll, 1000);
+      })
+      .catch(function () { setTimeout(poll, 2000); });
+  }
+  if ("{{ dep.status }}" === "running") poll();
+</script>
+{% endblock %}

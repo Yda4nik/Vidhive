@@ -34,10 +34,61 @@
     <a class="btn" href="/">← на панель</a>
   </div>
   {% include "_servers_table.html" %}
-  <p class="muted tiny" style="margin-top:12px">
-    Серверы добавляются в сеть автоматически: агент при запуске сам регистрируется у координатора.
-  </p>
 </div>
+
+<div class="card">
+  <details>
+    <summary style="cursor:pointer; font-size:16px; font-weight:600">➕ Добавить сервер (развернуть агента по SSH)</summary>
+    <p class="muted tiny" style="margin-top:10px">
+      Координатор подключится к пустому Linux-серверу по SSH и развернёт на нём агента.
+      Ключ используется один раз и не сохраняется.
+    </p>
+    <form method="post" action="/servers/deploy" id="deploy-form">
+      <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end">
+        <div style="flex:2 1 220px"><label>SSH хост</label>
+          <input type="text" name="ssh_host" id="ssh_host" placeholder="192.168.1.50" required></div>
+        <div style="flex:0 1 90px"><label>Порт</label>
+          <input type="number" name="ssh_port" value="22"></div>
+        <div style="flex:1 1 140px"><label>Пользователь</label>
+          <input type="text" name="ssh_user" value="root"></div>
+      </div>
+      <label>Приватный SSH-ключ (PEM)</label>
+      <textarea name="ssh_key" rows="5" required placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+        style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+        background:var(--input-bg); color:var(--txt); font:12px/1.4 monospace; resize:vertical"></textarea>
+      <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:6px">
+        <div style="flex:1 1 160px"><label>Имя сервера</label>
+          <input type="text" name="worker_name" id="worker_name" placeholder="agent-04" required></div>
+        <div style="flex:0 1 100px"><label>Потоки</label>
+          <input type="number" name="threads" value="8"></div>
+        <div style="flex:2 1 220px"><label>Путь хранилища</label>
+          <input type="text" name="storage_path" value="/var/lib/vidhive/videos"></div>
+      </div>
+      <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:6px">
+        <div style="flex:1 1 240px"><label>Адрес координатора (как его видит сервер)</label>
+          <input type="text" name="coordinator_url" value="{{ (request.base_url|string)|trim('/') }}"></div>
+        <div style="flex:1 1 240px"><label>Адрес агента (как его видит координатор)</label>
+          <input type="text" name="agent_url" id="agent_url" placeholder="http://192.168.1.50:8100"></div>
+      </div>
+      <div style="margin-top:14px">
+        <input type="submit" class="btn primary" value="Развернуть">
+      </div>
+    </form>
+  </details>
+</div>
+
+<script>
+  // Prefill the agent URL from the SSH host (until the admin edits it).
+  (function () {
+    var host = document.getElementById("ssh_host");
+    var agent = document.getElementById("agent_url");
+    var touched = false;
+    if (agent) agent.addEventListener("input", function () { touched = true; });
+    if (host) host.addEventListener("input", function () {
+      if (!touched && host.value.trim()) agent.value = "http://" + host.value.trim() + ":8100";
+    });
+  })();
+</script>
 
 {# Delete dialog — kept outside #srv-table so a live refresh never closes it. #}
 <div class="overlay" id="del-overlay">

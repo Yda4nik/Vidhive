@@ -13,11 +13,11 @@ import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,11 +34,19 @@ from app.api.jobs import (
 )
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
-from app.db.models import Invite, RoleModel, User, UserRole
+from app.db.models import AgentDeployment, Invite, RoleModel, User, UserRole
+from app.services import deployer, deployments
 from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
 from app.services.security import hash_password, verify_password
+from app.core.config import get_settings
 
 INVITE_TTL = timedelta(minutes=15)
+
+# Fixed remote layout the bootstrap/teardown scripts use (1 server = 1 agent).
+_INSTALL_DIR = "/opt/vidhive"
+_SERVICE_NAME = "vidhive-agent"
+_DEFAULT_STORAGE = "/var/lib/vidhive/videos"
+_WORKER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,150}$")
 from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
     FileRecord,
@@ -269,6 +277,96 @@ async def server_delete(
     except HTTPException as exc:
         return RedirectResponse(url=f"/servers?error={quote(str(exc.detail))}", status_code=303)
     return RedirectResponse(url="/servers", status_code=303)
+
+
+async def _run_job(dep_id: str, coro_factory) -> None:
+    """Run a deploy/teardown coroutine, streaming its lines into the registry."""
+    try:
+        code = await coro_factory(lambda line: deployments.append(dep_id, line))
+        deployments.finish(dep_id, code == 0)
+    except Exception as exc:  # noqa: BLE001 - surface any failure to the log
+        deployments.append(dep_id, f"ОШИБКА: {exc}")
+        deployments.finish(dep_id, False)
+    bus.publish()
+
+
+def _agent_port(agent_url: str) -> int:
+    try:
+        return urlparse(agent_url).port or 8100
+    except ValueError:
+        return 8100
+
+
+@router.post("/servers/deploy", dependencies=[Depends(require_role("administrator"))])
+async def server_deploy(
+    ssh_host: str = Form(...),
+    ssh_port: int = Form(22),
+    ssh_user: str = Form("root"),
+    ssh_key: str = Form(...),
+    worker_name: str = Form(...),
+    threads: int = Form(8),
+    storage_path: str = Form(_DEFAULT_STORAGE),
+    coordinator_url: str = Form(...),
+    agent_url: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    worker_name = worker_name.strip()
+    errors = []
+    if not _WORKER_NAME_RE.match(worker_name):
+        errors.append("имя воркера: только буквы, цифры, _ и -")
+    if not (1 <= ssh_port <= 65535):
+        errors.append("порт SSH вне диапазона")
+    if not storage_path.strip().startswith("/"):
+        errors.append("путь хранилища должен быть абсолютным")
+    if not ssh_host.strip() or not ssh_key.strip():
+        errors.append("укажите хост и SSH-ключ")
+    if errors:
+        return RedirectResponse(f"/servers?error={quote('; '.join(errors))}", status_code=303)
+
+    settings = get_settings()
+    env = {
+        "VIDHIVE_COORDINATOR_URL": coordinator_url.strip(),
+        "VIDHIVE_WORKER_NAME": worker_name,
+        "VIDHIVE_AGENT_URL": agent_url.strip(),
+        "VIDHIVE_AGENT_PORT": str(_agent_port(agent_url)),
+        "VIDHIVE_THREADS": str(threads),
+        "VIDHIVE_STORAGE_PATH": storage_path.strip(),
+        "VIDHIVE_AGENT_TOKEN": settings.agent_token,
+        "INSTALL_DIR": _INSTALL_DIR,
+        "SERVICE_NAME": _SERVICE_NAME,
+    }
+    params = deployer.DeployParams(
+        ssh_host=ssh_host.strip(), ssh_port=ssh_port, ssh_user=ssh_user.strip(),
+        ssh_key=ssh_key, env=env,
+    )
+    session.add(AgentDeployment(
+        worker_name=worker_name, ssh_host=ssh_host.strip(), ssh_port=ssh_port,
+        ssh_user=ssh_user.strip(), install_dir=_INSTALL_DIR, service_name=_SERVICE_NAME,
+        storage_path=storage_path.strip(),
+    ))
+    await session.commit()
+
+    dep = deployments.new_deployment("deploy", worker_name)
+    asyncio.create_task(_run_job(dep.id, lambda on_line: deployer.deploy(params, on_line)))
+    return RedirectResponse(f"/servers/deploy/{dep.id}", status_code=303)
+
+
+@router.get("/servers/deploy/{dep_id}", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("administrator"))])
+async def deploy_log_page(dep_id: str, request: Request):
+    dep = deployments.get(dep_id)
+    if dep is None:
+        return RedirectResponse("/servers", status_code=303)
+    return _page(request, "deploy_log.html", {"dep": dep})
+
+
+@router.get("/servers/deploy/{dep_id}/log",
+            dependencies=[Depends(require_role("administrator"))])
+async def deploy_log_fragment(dep_id: str):
+    dep = deployments.get(dep_id)
+    if dep is None:
+        return JSONResponse({"status": "error", "lines": ["развёртывание не найдено"]}, status_code=404)
+    return JSONResponse({"status": dep.status, "lines": dep.lines})
 
 
 async def _user_count(session: AsyncSession) -> int:
