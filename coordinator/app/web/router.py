@@ -309,6 +309,7 @@ def _agent_port(agent_url: str) -> int:
 
 @router.post("/servers/deploy", dependencies=[Depends(require_role("administrator"))])
 async def server_deploy(
+    request: Request,
     ssh_host: str = Form(...),
     ssh_port: int = Form(22),
     ssh_user: str = Form("root"),
@@ -316,11 +317,16 @@ async def server_deploy(
     worker_name: str = Form(...),
     threads: int = Form(8),
     storage_path: str = Form(_DEFAULT_STORAGE),
-    coordinator_url: str = Form(...),
-    agent_url: str = Form(...),
+    agent_url: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
     worker_name = worker_name.strip()
+    ssh_host = ssh_host.strip()
+    # The agent reaches the coordinator at the same address the admin used to
+    # open the web UI; the agent serves files at its own host:8100 by default.
+    coordinator_url = str(request.base_url).rstrip("/")
+    agent_url = agent_url.strip() or f"http://{ssh_host}:8100"
+
     errors = []
     if not _WORKER_NAME_RE.match(worker_name):
         errors.append("имя воркера: только буквы, цифры, _ и -")
@@ -328,7 +334,7 @@ async def server_deploy(
         errors.append("порт SSH вне диапазона")
     if not storage_path.strip().startswith("/"):
         errors.append("путь хранилища должен быть абсолютным")
-    if not ssh_host.strip() or not ssh_key.strip():
+    if not ssh_host or not ssh_key.strip():
         errors.append("укажите хост и SSH-ключ")
     if errors:
         return RedirectResponse(f"/servers?error={quote('; '.join(errors))}", status_code=303)

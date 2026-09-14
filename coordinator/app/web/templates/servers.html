@@ -65,9 +65,7 @@
           <input type="text" name="storage_path" value="/var/lib/vidhive/videos"></div>
       </div>
       <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:6px">
-        <div style="flex:1 1 240px"><label>Адрес координатора (как его видит сервер)</label>
-          <input type="text" name="coordinator_url" value="{{ (request.base_url|string)|trim('/') }}"></div>
-        <div style="flex:1 1 240px"><label>Адрес агента (как его видит координатор)</label>
+        <div style="flex:1 1 320px"><label>Адрес агента (необязательно — по умолчанию http://&lt;хост&gt;:8100)</label>
           <input type="text" name="agent_url" id="agent_url" placeholder="http://192.168.1.50:8100"></div>
       </div>
       <div style="margin-top:14px">
