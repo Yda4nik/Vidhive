@@ -57,14 +57,19 @@
     <thead><tr><th>Логин</th><th>Роль</th><th>Действия</th></tr></thead>
     <tbody>
     {% for u in users %}
+      {% set is_me = request.state.user and u.id == request.state.user.id %}
       <tr>
-        <td>{{ u.username }}</td>
+        <td>{{ u.username }}{% if is_me %} <span class="muted tiny">(вы)</span>{% endif %}</td>
         <td>
+          {% if is_me %}
+            <span class="pill run">{{ u.role }}</span>
+          {% else %}
           <form method="post" action="/users/{{ u.id }}/role" class="inline">
             <select name="role" onchange="this.form.submit()">
               {% for r in roles %}<option value="{{ r }}" {{ 'selected' if u.role == r else '' }}>{{ r }}</option>{% endfor %}
             </select>
           </form>
+          {% endif %}
         </td>
         <td style="white-space:nowrap">
           <form method="post" action="/users/{{ u.id }}/password" class="inline"
@@ -72,10 +77,12 @@
             <input type="hidden" name="password" class="pw">
             <span class="btn" onclick="this.closest('form').requestSubmit()">Сбросить пароль</span>
           </form>
+          {% if not is_me %}
           <form method="post" action="/users/{{ u.id }}/delete" class="inline"
                 onsubmit="return confirm('Удалить пользователя {{ u.username }}?')">
             <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="🗑">
           </form>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}

@@ -605,11 +605,19 @@ async def users_create(
 
 @router.post("/users/{user_id}/role", dependencies=[Depends(require_role("administrator"))])
 async def users_set_role(
-    user_id: int, role: str = Form(...), session: AsyncSession = Depends(get_session)
+    request: Request, user_id: int, role: str = Form(...),
+    session: AsyncSession = Depends(get_session),
 ):
     if role not in ROLE_RANK:
         return RedirectResponse("/users?error=неизвестная+роль", status_code=303)
     current = await role_of(session, user_id)
+    me = request.state.user
+    # You can't strip your own admin role — another admin must, so you can never
+    # accidentally lock yourself out.
+    if me is not None and me.id == user_id and current == "administrator" and role != "administrator":
+        return RedirectResponse(
+            "/users?error=нельзя+снять+роль+администратора+с+самого+себя", status_code=303
+        )
     if current == "administrator" and role != "administrator" and await _admin_count(session) <= 1:
         return RedirectResponse("/users?error=нельзя+снять+последнего+админа", status_code=303)
     await _set_role(session, user_id, role)
