@@ -51,8 +51,15 @@
     .btn.primary { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
     form.inline { display:inline; margin:0; }
     label { display:block; margin:12px 0 4px; color:var(--muted); font-size:13px; }
-    input[type=text], input[type=number], select { width:100%; padding:8px 10px; border-radius:8px;
+    input[type=text], input[type=password], input[type=number], select { width:100%; padding:8px 10px; border-radius:8px;
       border:1px solid var(--line); background:var(--input-bg); color:var(--txt); font-size:14px; }
+    /* Keep the browser's autofill from repainting fields white/yellow. */
+    input:-webkit-autofill, input:-webkit-autofill:hover,
+    input:-webkit-autofill:focus, input:-webkit-autofill:active {
+      -webkit-text-fill-color: var(--txt);
+      -webkit-box-shadow: 0 0 0 1000px var(--input-bg) inset;
+      caret-color: var(--txt);
+    }
     .row { display:flex; gap:12px; align-items:center; }
     .actions { display:flex; gap:6px; flex-wrap:wrap; }
     .stats { display:flex; gap:28px; flex-wrap:wrap; }
