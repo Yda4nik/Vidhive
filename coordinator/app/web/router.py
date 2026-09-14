@@ -34,7 +34,7 @@ from app.api.jobs import (
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
 from app.db.models import RoleModel, User, UserRole
-from app.services.auth import ROLE_RANK, require_role, role_of
+from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
 from app.services.security import hash_password, verify_password
 from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
@@ -268,8 +268,51 @@ async def server_delete(
     return RedirectResponse(url="/servers", status_code=303)
 
 
+async def _user_count(session: AsyncSession) -> int:
+    return (await session.execute(select(func.count()).select_from(User))).scalar_one()
+
+
+@router.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request, session: AsyncSession = Depends(get_session)):
+    # First-run wizard: only available until the first user exists.
+    if await _user_count(session) > 0:
+        return RedirectResponse("/login", status_code=303)
+    return _page(request, "setup.html", {"error": ""})
+
+
+@router.post("/setup")
+async def setup_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    if await _user_count(session) > 0:
+        return RedirectResponse("/login", status_code=303)
+    if not username.strip() or not password:
+        return _page(request, "setup.html", {"error": "Заполните логин и пароль"})
+    if password != confirm:
+        return _page(request, "setup.html", {"error": "Пароли не совпадают"})
+    await seed_roles(session)
+    user = User(username=username.strip(), password_hash=hash_password(password))
+    session.add(user)
+    await session.flush()
+    rid = (
+        await session.execute(select(RoleModel.id).where(RoleModel.name == "administrator"))
+    ).scalar_one()
+    session.add(UserRole(user_id=user.id, role_id=rid))
+    await session.commit()
+    request.session["user_id"] = user.id  # log the new admin straight in
+    return RedirectResponse("/", status_code=303)
+
+
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, next: str = "/", error: str = ""):
+async def login_page(
+    request: Request, next: str = "/", error: str = "", session: AsyncSession = Depends(get_session)
+):
+    if await _user_count(session) == 0:
+        return RedirectResponse("/setup", status_code=303)
     return _page(request, "login.html", {"next": next, "error": error})
 
 
