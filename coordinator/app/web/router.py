@@ -185,12 +185,13 @@ async def _dashboard_context(session: AsyncSession) -> dict:
     }
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse, dependencies=[Depends(require_role("viewer"))])
 async def dashboard(request: Request, session: AsyncSession = Depends(get_session)):
     return _page(request, "index.html", await _dashboard_context(session))
 
 
-@router.get("/fragments/dashboard", response_class=HTMLResponse)
+@router.get("/fragments/dashboard", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("viewer"))])
 async def dashboard_fragment(request: Request, session: AsyncSession = Depends(get_session)):
     """The live dashboard body, re-fetched on a real-time event."""
     return _page(request, "_dashboard.html", await _dashboard_context(session))
@@ -292,7 +293,7 @@ async def logout(request: Request):
     return RedirectResponse(url="/login", status_code=303)
 
 
-@router.get("/events/stream")
+@router.get("/events/stream", dependencies=[Depends(require_role("viewer"))])
 async def events_stream(request: Request):
     """Server-Sent Events: pushes an 'update' the instant state changes."""
 
@@ -390,7 +391,8 @@ async def _failed_item_count(session: AsyncSession) -> int:
     ).scalar_one()
 
 
-@router.get("/fragments/jobs", response_class=HTMLResponse)
+@router.get("/fragments/jobs", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("viewer"))])
 async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_session)):
     return _page(request, "_jobs_table.html", {"rows": await _active_job_rows(session)})
 
@@ -400,7 +402,7 @@ async def _all_jobs_brief(session: AsyncSession) -> list[dict]:
     return [{"id": j.id, "name": j.name} for j in jobs]
 
 
-@router.get("/jobs", response_class=HTMLResponse)
+@router.get("/jobs", response_class=HTMLResponse, dependencies=[Depends(require_role("viewer"))])
 async def jobs_page(request: Request, error: str = "", session: AsyncSession = Depends(get_session)):
     groups = (
         await session.execute(select(Group).where(Group.kind == "user").order_by(Group.id))
@@ -414,7 +416,7 @@ async def jobs_page(request: Request, error: str = "", session: AsyncSession = D
     })
 
 
-@router.post("/jobs/{job_id}/{action}")
+@router.post("/jobs/{job_id}/{action}", dependencies=[Depends(require_role("operator"))])
 async def job_action(job_id: int, action: str, session: AsyncSession = Depends(get_session)):
     handler = _JOB_ACTIONS.get(action)
     if handler is None:
@@ -485,7 +487,7 @@ def _build_targets(source, mode, values, range_from, range_to):
     return resolved, targets
 
 
-@router.post("/add")
+@router.post("/add", dependencies=[Depends(require_role("operator"))])
 async def add_submit(
     source: str = Form("auto"),
     mode: str = Form("link"),
@@ -532,7 +534,7 @@ _SORT_COLUMNS = {
 }
 
 
-@router.get("/library", response_class=HTMLResponse)
+@router.get("/library", response_class=HTMLResponse, dependencies=[Depends(require_role("viewer"))])
 async def library(
     request: Request,
     q: str = "",
@@ -659,7 +661,8 @@ async def library(
     )
 
 
-@router.get("/player/{item_id}", response_class=HTMLResponse)
+@router.get("/player/{item_id}", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("viewer"))])
 async def player(item_id: int, request: Request, session: AsyncSession = Depends(get_session)):
     """A real player page; the <video> element streams from /watch/{id}."""
     item = await session.get(Item, item_id)
@@ -685,7 +688,7 @@ async def player(item_id: int, request: Request, session: AsyncSession = Depends
 _STREAM_HEADERS = ("content-type", "content-length", "accept-ranges", "content-range")
 
 
-@router.get("/watch/{item_id}")
+@router.get("/watch/{item_id}", dependencies=[Depends(require_role("viewer"))])
 async def watch(item_id: int, request: Request, session: AsyncSession = Depends(get_session)):
     """Proxy the video from the agent that holds it, forwarding Range requests."""
     item = await session.get(Item, item_id)

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Event, Item, Job, MediaMetadata, Worker
 from app.db.session import get_session
 from app.services import scheduler
+from app.services.auth import require_role
 from app.services.events import log_event
 from vidhive_common.enums import ItemStatus, JobState
 from vidhive_common.ranges import RangeParseError, parse_range
@@ -58,7 +59,8 @@ async def _transition(session: AsyncSession, job: Job, action: str, new_state: J
     return job
 
 
-@router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_role("operator"))])
 async def create_job(payload: JobCreate, session: AsyncSession = Depends(get_session)) -> Job:
     range_start, range_end = payload.range_start, payload.range_end
     if payload.range_spec is not None:
@@ -95,18 +97,19 @@ async def create_job(payload: JobCreate, session: AsyncSession = Depends(get_ses
     return job
 
 
-@router.get("", response_model=list[JobOut])
+@router.get("", response_model=list[JobOut], dependencies=[Depends(require_role("viewer"))])
 async def list_jobs(session: AsyncSession = Depends(get_session)) -> list[Job]:
     result = await session.execute(select(Job).order_by(Job.id.desc()))
     return list(result.scalars().all())
 
 
-@router.get("/{job_id}", response_model=JobOut)
+@router.get("/{job_id}", response_model=JobOut, dependencies=[Depends(require_role("viewer"))])
 async def get_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Job:
     return await _get_job_or_404(session, job_id)
 
 
-@router.post("/{job_id}/start", response_model=JobOut)
+@router.post("/{job_id}/start", response_model=JobOut,
+             dependencies=[Depends(require_role("operator"))])
 async def start_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Job:
     job = await _get_job_or_404(session, job_id)
     _guard(job, "start")
@@ -116,25 +119,28 @@ async def start_job(job_id: int, session: AsyncSession = Depends(get_session)) -
     return await _transition(session, job, "start", JobState.RUNNING)
 
 
-@router.post("/{job_id}/pause", response_model=JobOut)
+@router.post("/{job_id}/pause", response_model=JobOut,
+             dependencies=[Depends(require_role("operator"))])
 async def pause_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Job:
     job = await _get_job_or_404(session, job_id)
     return await _transition(session, job, "pause", JobState.PAUSED)
 
 
-@router.post("/{job_id}/resume", response_model=JobOut)
+@router.post("/{job_id}/resume", response_model=JobOut,
+             dependencies=[Depends(require_role("operator"))])
 async def resume_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Job:
     job = await _get_job_or_404(session, job_id)
     return await _transition(session, job, "resume", JobState.RUNNING)
 
 
-@router.post("/{job_id}/stop", response_model=JobOut)
+@router.post("/{job_id}/stop", response_model=JobOut,
+             dependencies=[Depends(require_role("operator"))])
 async def stop_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Job:
     job = await _get_job_or_404(session, job_id)
     return await _transition(session, job, "stop", JobState.STOPPED)
 
 
-@router.post("/{job_id}/retry")
+@router.post("/{job_id}/retry", dependencies=[Depends(require_role("operator"))])
 async def retry_failed(job_id: int, session: AsyncSession = Depends(get_session)) -> dict:
     """Re-queue identifiers that ended in a transient failure."""
     await _get_job_or_404(session, job_id)
@@ -146,7 +152,7 @@ async def retry_failed(job_id: int, session: AsyncSession = Depends(get_session)
     return {"requeued": requeued}
 
 
-@router.post("/retry-all")
+@router.post("/retry-all", dependencies=[Depends(require_role("operator"))])
 async def retry_all(session: AsyncSession = Depends(get_session)) -> dict:
     """Re-queue failed identifiers across every job."""
     job_ids = (await session.execute(select(Job.id).order_by(Job.id))).scalars().all()
@@ -157,7 +163,7 @@ async def retry_all(session: AsyncSession = Depends(get_session)) -> dict:
     return {"requeued": total}
 
 
-@router.delete("/{job_id}", response_model=Ack)
+@router.delete("/{job_id}", response_model=Ack, dependencies=[Depends(require_role("operator"))])
 async def delete_job(job_id: int, session: AsyncSession = Depends(get_session)) -> Ack:
     """Stop and remove a job together with everything it downloaded."""
     job = await _get_job_or_404(session, job_id)
@@ -185,7 +191,8 @@ async def delete_job(job_id: int, session: AsyncSession = Depends(get_session)) 
     return Ack()
 
 
-@router.get("/{job_id}/items", response_model=list[ItemOut])
+@router.get("/{job_id}/items", response_model=list[ItemOut],
+            dependencies=[Depends(require_role("viewer"))])
 async def list_items(
     job_id: int,
     status_filter: str | None = Query(default=None, alias="status"),
@@ -222,7 +229,8 @@ async def list_items(
     ]
 
 
-@router.get("/{job_id}/events", response_model=list[EventOut])
+@router.get("/{job_id}/events", response_model=list[EventOut],
+            dependencies=[Depends(require_role("viewer"))])
 async def list_events(
     job_id: int,
     limit: int = Query(default=100, ge=1, le=1000),

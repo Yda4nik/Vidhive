@@ -39,14 +39,17 @@
       ★ Избранное
       {% for g in groups %}{% if g.kind == 'favorites' %}<span class="cnt">{{ g.count }}</span>{% endif %}{% endfor %}
     </span>
+    {% set can_edit = request.state.role in ('operator', 'administrator') %}
     {% for g in groups %}{% if g.kind == 'user' %}
       <span class="tab {{ 'active' if group == g.id|string else '' }}" onclick="setParam('group','{{ g.id }}')">
         {{ g.name }} <span class="cnt">{{ g.count }}</span>
+        {% if can_edit %}
         <span class="mini" title="Переименовать" onclick="renameGroup({{ g.id }}, '{{ g.name }}', event)">✎</span>
         <span class="mini" title="Удалить группу" onclick="deleteGroup({{ g.id }}, event)">✕</span>
+        {% endif %}
       </span>
     {% endif %}{% endfor %}
-    <span class="tab" title="Новая группа" onclick="newGroup()">＋</span>
+    {% if can_edit %}<span class="tab" title="Новая группа" onclick="newGroup()">＋</span>{% endif %}
   </div>
 
   <div class="toolbar">
@@ -96,12 +99,14 @@
 
 <div class="bulkbar" id="bulkbar">
   <b>Выбрано <span id="selcount">0</span></b>
+  {% if can_edit %}
   <span class="btn" onclick="bulkFav()">★ В избранное</span>
   <select onchange="if(this.value){bulkAssign(+this.value); this.value=''}">
     <option value="">В группу…</option>
     {% for g in groups %}{% if g.kind == 'user' %}<option value="{{ g.id }}">{{ g.name }}</option>{% endif %}{% endfor %}
   </select>
   <span class="btn" onclick="bulkDelete()" style="border-color:var(--bad); color:var(--bad)">🗑 Удалить</span>
+  {% endif %}
   <span class="btn" onclick="clearSel()">Снять выбор</span>
 </div>
 
@@ -121,9 +126,9 @@
           <td class="muted">{{ it.size_bytes|hsize }}{% if it.size_bytes %}<div class="tiny">{{ it.size_bytes|bexact }}</div>{% endif %}</td>
           <td class="muted">{{ it.worker or "—" }}</td>
           <td style="white-space:nowrap">
-            <button class="star" title="В избранное" onclick="toggleFav({{ it.id }}, {{ 'true' if it.fav else 'false' }}, event)">{{ '★' if it.fav else '☆' }}</button>
+            {% if can_edit %}<button class="star" title="В избранное" onclick="toggleFav({{ it.id }}, {{ 'true' if it.fav else 'false' }}, event)">{{ '★' if it.fav else '☆' }}</button>{% endif %}
             <a class="btn" href="/player/{{ it.id }}" onclick="event.stopPropagation()">▶ смотреть</a>
-            <button class="del" title="Удалить" onclick="delOne({{ it.id }}, event)">🗑</button>
+            {% if can_edit %}<button class="del" title="Удалить" onclick="delOne({{ it.id }}, event)">🗑</button>{% endif %}
           </td>
         </tr>
         {% endfor %}

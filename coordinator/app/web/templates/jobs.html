@@ -21,6 +21,7 @@
 </div>
 {% endif %}
 
+{% if request.state.role in ('operator', 'administrator') %}
 <div class="card">
   <h2>Добавить загрузку</h2>
   <form method="post" action="/add" id="add-form">
@@ -59,10 +60,12 @@
     </div>
   </form>
 </div>
+{% endif %}
 
 <div class="card">
   <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px">
     <h2 style="margin:0">Активные задания</h2>
+    {% if request.state.role in ('operator', 'administrator') %}
     <div class="row" style="gap:8px; padding-bottom:7px; border-bottom:2px solid var(--accent)">
       <select id="retry-scope" style="width:auto; max-width:220px">
         <option value="all">Все задания</option>
@@ -70,6 +73,7 @@
       </select>
       <span class="btn" onclick="retryErrors()" style="white-space:nowrap">↻ Повторить ошибки{% if failed_count %} ({{ failed_count }}){% endif %}</span>
     </div>
+    {% endif %}
   </div>
   <div id="jobs-live">
     {% include "_jobs_table.html" %}

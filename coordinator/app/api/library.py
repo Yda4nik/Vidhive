@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Group, Item, ItemGroup, Worker
 from app.db.session import get_session
+from app.services.auth import require_role
 from app.services.events import log_event
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import Ack, GroupCreate, GroupOut, LibraryAction
@@ -48,7 +49,8 @@ async def _count(session: AsyncSession, group_id: int) -> int:
 # --------------------------------------------------------------------------- #
 # Groups
 # --------------------------------------------------------------------------- #
-@router.get("/groups", response_model=list[GroupOut])
+@router.get("/groups", response_model=list[GroupOut],
+            dependencies=[Depends(require_role("viewer"))])
 async def list_groups(session: AsyncSession = Depends(get_session)) -> list[GroupOut]:
     await get_or_create_favorites(session)
     await session.commit()
@@ -59,7 +61,7 @@ async def list_groups(session: AsyncSession = Depends(get_session)) -> list[Grou
     return out
 
 
-@router.post("/groups", response_model=GroupOut)
+@router.post("/groups", response_model=GroupOut, dependencies=[Depends(require_role("operator"))])
 async def create_group(payload: GroupCreate, session: AsyncSession = Depends(get_session)) -> GroupOut:
     group = Group(name=payload.name.strip(), kind="user")
     session.add(group)
@@ -68,7 +70,8 @@ async def create_group(payload: GroupCreate, session: AsyncSession = Depends(get
     return GroupOut(id=group.id, name=group.name, kind=group.kind, count=0)
 
 
-@router.patch("/groups/{group_id}", response_model=GroupOut)
+@router.patch("/groups/{group_id}", response_model=GroupOut,
+              dependencies=[Depends(require_role("operator"))])
 async def rename_group(
     group_id: int, payload: GroupCreate, session: AsyncSession = Depends(get_session)
 ) -> GroupOut:
@@ -80,7 +83,8 @@ async def rename_group(
     return GroupOut(id=group.id, name=group.name, kind=group.kind, count=await _count(session, group_id))
 
 
-@router.delete("/groups/{group_id}", response_model=Ack)
+@router.delete("/groups/{group_id}", response_model=Ack,
+               dependencies=[Depends(require_role("operator"))])
 async def delete_group(group_id: int, session: AsyncSession = Depends(get_session)) -> Ack:
     group = await session.get(Group, group_id)
     if group is None:
@@ -110,7 +114,8 @@ async def _add_memberships(session: AsyncSession, item_ids: list[int], group_id:
             session.add(ItemGroup(item_id=iid, group_id=group_id))
 
 
-@router.post("/library/assign", response_model=Ack)
+@router.post("/library/assign", response_model=Ack,
+             dependencies=[Depends(require_role("operator"))])
 async def assign(payload: LibraryAction, session: AsyncSession = Depends(get_session)) -> Ack:
     if payload.group_id is None:
         raise HTTPException(status_code=422, detail="group_id required")
@@ -121,7 +126,8 @@ async def assign(payload: LibraryAction, session: AsyncSession = Depends(get_ses
     return Ack()
 
 
-@router.post("/library/unassign", response_model=Ack)
+@router.post("/library/unassign", response_model=Ack,
+             dependencies=[Depends(require_role("operator"))])
 async def unassign(payload: LibraryAction, session: AsyncSession = Depends(get_session)) -> Ack:
     if payload.group_id is None:
         raise HTTPException(status_code=422, detail="group_id required")
@@ -134,7 +140,8 @@ async def unassign(payload: LibraryAction, session: AsyncSession = Depends(get_s
     return Ack()
 
 
-@router.post("/library/favorite", response_model=Ack)
+@router.post("/library/favorite", response_model=Ack,
+             dependencies=[Depends(require_role("operator"))])
 async def favorite(payload: LibraryAction, session: AsyncSession = Depends(get_session)) -> Ack:
     fav = await get_or_create_favorites(session)
     if payload.on:
@@ -152,7 +159,8 @@ async def favorite(payload: LibraryAction, session: AsyncSession = Depends(get_s
 # --------------------------------------------------------------------------- #
 # Full deletion (file on the agent + database rows)
 # --------------------------------------------------------------------------- #
-@router.post("/library/delete", response_model=Ack)
+@router.post("/library/delete", response_model=Ack,
+             dependencies=[Depends(require_role("operator"))])
 async def delete_videos(payload: LibraryAction, session: AsyncSession = Depends(get_session)) -> Ack:
     items = (
         await session.execute(select(Item).where(Item.id.in_(payload.item_ids)))

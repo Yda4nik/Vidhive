@@ -25,12 +25,14 @@
           <span class="pill {{ cls }}">{{ job.state }}</span>
         </td>
         <td style="white-space:nowrap">
-          {% if job.state == 'running' %}
-            <form class="inline" method="post" action="/jobs/{{ job.id }}/pause"><button class="btn">⏸ пауза</button></form>
-          {% elif job.state == 'paused' %}
-            <form class="inline" method="post" action="/jobs/{{ job.id }}/resume"><button class="btn">▶ продолжить</button></form>
+          {% if request.state.role in ('operator', 'administrator') %}
+            {% if job.state == 'running' %}
+              <form class="inline" method="post" action="/jobs/{{ job.id }}/pause"><button class="btn">⏸ пауза</button></form>
+            {% elif job.state == 'paused' %}
+              <form class="inline" method="post" action="/jobs/{{ job.id }}/resume"><button class="btn">▶ продолжить</button></form>
+            {% endif %}
+            <button class="del" title="Удалить задание и его видео" onclick="deleteJob({{ job.id }})">🗑</button>
           {% endif %}
-          <button class="del" title="Удалить задание и его видео" onclick="deleteJob({{ job.id }})">🗑</button>
         </td>
       </tr>
       {% endfor %}
