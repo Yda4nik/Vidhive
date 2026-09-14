@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — регистрация{% endblock %}
+{% block content %}
+<div class="card" style="max-width:420px; margin:60px auto">
+  {% if invalid %}
+    <h2>Ссылка недействительна</h2>
+    <p class="muted">Приглашение не найдено или истекло (ссылки живут 15 минут). Попросите
+      администратора создать новую.</p>
+  {% else %}
+    <h2>Регистрация</h2>
+    <p class="muted tiny">Вы получите доступ на просмотр. Роль при необходимости повысит администратор.</p>
+    {% if error %}<p style="color:var(--bad)">⚠ {{ error }}</p>{% endif %}
+    <form method="post" action="/register">
+      <input type="hidden" name="token" value="{{ token }}">
+      <label>Логин</label>
+      <input type="text" name="username" autofocus required>
+      <label>Пароль</label>
+      <input type="password" name="password" required>
+      <label>Повторите пароль</label>
+      <input type="password" name="confirm" required>
+      <div style="margin-top:16px">
+        <input type="submit" class="btn primary" value="Зарегистрироваться">
+      </div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

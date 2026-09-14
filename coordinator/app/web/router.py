@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -33,9 +34,11 @@ from app.api.jobs import (
 )
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
-from app.db.models import RoleModel, User, UserRole
+from app.db.models import Invite, RoleModel, User, UserRole
 from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
 from app.services.security import hash_password, verify_password
+
+INVITE_TTL = timedelta(minutes=15)
 from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
     FileRecord,
@@ -339,10 +342,40 @@ async def logout(request: Request):
     return RedirectResponse(url="/login", status_code=303)
 
 
+def _aware(dt: datetime) -> datetime:
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 async def _users_context(session: AsyncSession) -> dict:
     users = (await session.execute(select(User).order_by(User.username))).scalars().all()
     rows = [{"id": u.id, "username": u.username, "role": await role_of(session, u.id)} for u in users]
-    return {"users": rows, "roles": list(ROLE_RANK.keys())}
+
+    now = datetime.now(timezone.utc)
+    active = (
+        await session.execute(
+            select(Invite).where(Invite.expires_at > now).order_by(Invite.id.desc())
+        )
+    ).scalars().all()
+    invites = [
+        {
+            "id": inv.id,
+            "token": inv.token,
+            "mins_left": max(0, round((_aware(inv.expires_at) - now).total_seconds() / 60)),
+        }
+        for inv in active
+    ]
+    return {"users": rows, "roles": list(ROLE_RANK.keys()), "invites": invites}
+
+
+async def _valid_invite(session: AsyncSession, token: str) -> Invite | None:
+    if not token:
+        return None
+    now = datetime.now(timezone.utc)
+    return (
+        await session.execute(
+            select(Invite).where(Invite.token == token).where(Invite.expires_at > now)
+        )
+    ).scalar_one_or_none()
 
 
 async def _admin_count(session: AsyncSession) -> int:
@@ -429,6 +462,70 @@ async def users_delete(
         await session.delete(user)
         await session.commit()
     return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/invite", dependencies=[Depends(require_role("administrator"))])
+async def invite_create(session: AsyncSession = Depends(get_session)):
+    invite = Invite(
+        token=secrets.token_urlsafe(24),
+        expires_at=datetime.now(timezone.utc) + INVITE_TTL,
+    )
+    session.add(invite)
+    await session.commit()
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.post("/users/invite/{invite_id}/delete", dependencies=[Depends(require_role("administrator"))])
+async def invite_delete(invite_id: int, session: AsyncSession = Depends(get_session)):
+    invite = await session.get(Invite, invite_id)
+    if invite is not None:
+        await session.delete(invite)
+        await session.commit()
+    return RedirectResponse("/users", status_code=303)
+
+
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request, token: str = "", session: AsyncSession = Depends(get_session)):
+    invite = await _valid_invite(session, token)
+    if invite is None:
+        return _page(request, "register.html", {"invalid": True, "token": "", "error": ""})
+    return _page(request, "register.html", {"invalid": False, "token": token, "error": ""})
+
+
+@router.post("/register")
+async def register_submit(
+    request: Request,
+    token: str = Form(""),
+    username: str = Form(...),
+    password: str = Form(...),
+    confirm: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    invite = await _valid_invite(session, token)
+    if invite is None:
+        return _page(request, "register.html", {"invalid": True, "token": "", "error": ""})
+    if not username.strip() or not password:
+        return _page(request, "register.html",
+                     {"invalid": False, "token": token, "error": "Заполните логин и пароль"})
+    if password != confirm:
+        return _page(request, "register.html",
+                     {"invalid": False, "token": token, "error": "Пароли не совпадают"})
+    exists = (
+        await session.execute(select(User).where(User.username == username.strip()))
+    ).scalar_one_or_none()
+    if exists is not None:
+        return _page(request, "register.html",
+                     {"invalid": False, "token": token, "error": "Такой логин уже занят"})
+
+    await seed_roles(session)
+    user = User(username=username.strip(), password_hash=hash_password(password))
+    session.add(user)
+    await session.flush()
+    rid = (await session.execute(select(RoleModel.id).where(RoleModel.name == "viewer"))).scalar_one()
+    session.add(UserRole(user_id=user.id, role_id=rid))
+    await session.commit()
+    request.session["user_id"] = user.id  # log the newcomer straight in (as viewer)
+    return RedirectResponse("/", status_code=303)
 
 
 @router.get("/events/stream", dependencies=[Depends(require_role("viewer"))])

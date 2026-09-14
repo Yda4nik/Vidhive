@@ -16,6 +16,42 @@
 </div>
 
 <div class="card">
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px">
+    <h2 style="margin:0">Регистрация по ссылке</h2>
+    <form method="post" action="/users/invite" class="inline">
+      <input type="submit" class="btn primary" value="Создать ссылку">
+    </form>
+  </div>
+  <p class="muted tiny">Ссылка действует 15 минут. Кто перейдёт по ней — заведёт аккаунт с доступом на просмотр; роль повысите здесь же.</p>
+  {% if invites %}
+    <table>
+      <thead><tr><th>Ссылка</th><th>Осталось</th><th></th></tr></thead>
+      <tbody>
+      {% for inv in invites %}
+        {% set link = request.base_url|string ~ 'register?token=' ~ inv.token %}
+        <tr>
+          <td style="min-width:320px">
+            <div class="in-row" style="display:flex; gap:6px; align-items:center">
+              <input type="text" readonly value="{{ link }}" onclick="this.select()">
+              <span class="btn" onclick="navigator.clipboard.writeText('{{ link }}'); this.textContent='✓'">Копировать</span>
+            </div>
+          </td>
+          <td class="muted">~{{ inv.mins_left }} мин</td>
+          <td>
+            <form method="post" action="/users/invite/{{ inv.id }}/delete" class="inline">
+              <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="✕">
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Активных ссылок нет.</p>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Пользователи</h2>
   <table>
     <thead><tr><th>Логин</th><th>Роль</th><th>Действия</th></tr></thead>

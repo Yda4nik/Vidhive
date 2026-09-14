@@ -67,6 +67,18 @@ class UserRole(Base):
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
 
 
+class Invite(Base):
+    """A time-limited self-registration link. Registering through it always
+    grants the minimal ``viewer`` role; an admin promotes the user afterwards."""
+
+    __tablename__ = "invites"
+
+    id: Mapped[int] = _pk()
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 # --------------------------------------------------------------------------- #
 # Workers
 # --------------------------------------------------------------------------- #
