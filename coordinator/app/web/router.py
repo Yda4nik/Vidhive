@@ -544,7 +544,12 @@ async def _users_context(session: AsyncSession) -> dict:
         }
         for inv in active
     ]
-    return {"users": rows, "roles": list(ROLE_RANK.keys()), "invites": invites}
+    return {
+        "users": rows,
+        "roles": list(ROLE_RANK.keys()),
+        "invites": invites,
+        "owner_id": await _owner_id(session),
+    }
 
 
 async def _valid_invite(session: AsyncSession, token: str) -> Invite | None:
@@ -567,6 +572,11 @@ async def _admin_count(session: AsyncSession) -> int:
             .where(RoleModel.name == "administrator")
         )
     ).scalar_one()
+
+
+async def _owner_id(session: AsyncSession) -> int | None:
+    """The owner is the first-registered user (smallest id) — protected forever."""
+    return (await session.execute(select(func.min(User.id)))).scalar_one_or_none()
 
 
 async def _set_role(session: AsyncSession, user_id: int, role: str) -> None:
@@ -612,6 +622,9 @@ async def users_set_role(
         return RedirectResponse("/users?error=неизвестная+роль", status_code=303)
     current = await role_of(session, user_id)
     me = request.state.user
+    # The owner (first-registered user) can never be demoted, by anyone.
+    if user_id == await _owner_id(session) and role != "administrator":
+        return RedirectResponse("/users?error=нельзя+понизить+владельца", status_code=303)
     # You can't strip your own admin role — another admin must, so you can never
     # accidentally lock yourself out.
     if me is not None and me.id == user_id and current == "administrator" and role != "administrator":
@@ -641,6 +654,8 @@ async def users_delete(
     request: Request, user_id: int, session: AsyncSession = Depends(get_session)
 ):
     me = request.state.user
+    if user_id == await _owner_id(session):
+        return RedirectResponse("/users?error=нельзя+удалить+владельца", status_code=303)
     if me is not None and me.id == user_id:
         return RedirectResponse("/users?error=нельзя+удалить+себя", status_code=303)
     if await role_of(session, user_id) == "administrator" and await _admin_count(session) <= 1:

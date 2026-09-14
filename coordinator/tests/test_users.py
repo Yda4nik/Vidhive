@@ -33,6 +33,28 @@ def test_admin_cannot_demote_self(client, make_user, raw_sql):
     assert role == "administrator"  # unchanged — you can't strip your own admin
 
 
+def test_owner_cannot_be_demoted_by_anyone(anon_client, make_user, raw_sql):
+    # tester-admin is the first user -> the owner. A second admin cannot demote it.
+    make_user("boss", "pw", "administrator")
+    anon_client.post("/login", data={"username": "boss", "password": "pw"})
+    owner = raw_sql("SELECT MIN(id) FROM users")[0][0]
+    r = anon_client.post(f"/users/{owner}/role", data={"role": "viewer"})
+    assert r.status_code == 200
+    role = raw_sql(
+        "SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id=r.id WHERE ur.user_id=?",
+        (owner,),
+    )[0][0]
+    assert role == "administrator"
+
+
+def test_owner_cannot_be_deleted(anon_client, make_user, raw_sql):
+    make_user("boss", "pw", "administrator")
+    anon_client.post("/login", data={"username": "boss", "password": "pw"})
+    owner = raw_sql("SELECT MIN(id) FROM users")[0][0]
+    anon_client.post(f"/users/{owner}/delete")
+    assert raw_sql("SELECT COUNT(*) FROM users WHERE id=?", (owner,))[0][0] == 1
+
+
 def test_admin_can_change_role(client, make_user, raw_sql):
     make_user("mover", "pw", "viewer")
     uid = raw_sql("SELECT id FROM users WHERE username='mover'")[0][0]

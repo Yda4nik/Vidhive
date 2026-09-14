@@ -58,10 +58,14 @@
     <tbody>
     {% for u in users %}
       {% set is_me = request.state.user and u.id == request.state.user.id %}
+      {% set is_owner = u.id == owner_id %}
+      {% set locked = is_me or is_owner %}
       <tr>
-        <td>{{ u.username }}{% if is_me %} <span class="muted tiny">(вы)</span>{% endif %}</td>
+        <td>{{ u.username }}
+          {% if is_owner %} <span class="muted tiny">(владелец)</span>
+          {% elif is_me %} <span class="muted tiny">(вы)</span>{% endif %}</td>
         <td>
-          {% if is_me %}
+          {% if locked %}
             <span class="pill run">{{ u.role }}</span>
           {% else %}
           <form method="post" action="/users/{{ u.id }}/role" class="inline">
@@ -77,7 +81,7 @@
             <input type="hidden" name="password" class="pw">
             <span class="btn" onclick="this.closest('form').requestSubmit()">Сбросить пароль</span>
           </form>
-          {% if not is_me %}
+          {% if not locked %}
           <form method="post" action="/users/{{ u.id }}/delete" class="inline"
                 onsubmit="return confirm('Удалить пользователя {{ u.username }}?')">
             <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="🗑">
