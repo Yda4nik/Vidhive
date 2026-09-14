@@ -29,6 +29,11 @@
         <td style="white-space:nowrap">
           <button class="del" title="Удалить сервер"
                   onclick="openDelete({{ w.id }}, '{{ w.name|e }}', {{ videos.get(w.id, 0) }})">🗑</button>
+          {% set dep = deployed.get(w.id) %}
+          {% if dep %}
+          <button class="del" title="Снести с машины по SSH"
+                  onclick="openTeardown({{ w.id }}, '{{ w.name|e }}', '{{ dep.ssh_host }}', {{ dep.ssh_port }}, '{{ dep.ssh_user }}')">🧨</button>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

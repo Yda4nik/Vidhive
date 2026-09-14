@@ -112,9 +112,49 @@
   </div>
 </div>
 
+<div class="overlay" id="td-overlay">
+  <div class="modal">
+    <h3>Снести «<span id="td-name"></span>» с машины?</h3>
+    <p>Остановит службу и удалит код, конфиг и хранилище на самом сервере. Введите SSH-ключ ещё раз — он не хранится.</p>
+    <form method="post" id="td-form">
+      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-end">
+        <div style="flex:2 1 160px"><label>SSH хост</label><input type="text" name="ssh_host" id="td-host"></div>
+        <div style="flex:0 1 80px"><label>Порт</label><input type="number" name="ssh_port" id="td-port"></div>
+        <div style="flex:1 1 120px"><label>Пользователь</label><input type="text" name="ssh_user" id="td-user"></div>
+      </div>
+      <label>Приватный SSH-ключ (PEM)</label>
+      <textarea name="ssh_key" rows="4" required
+        style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+        background:var(--input-bg); color:var(--txt); font:12px/1.4 monospace; resize:vertical"></textarea>
+      <div style="display:flex; justify-content:space-between; margin-top:12px">
+        <span class="btn" onclick="closeTeardown()">Отмена</span>
+        <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="Снести">
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
   var CAN_REDISTRIBUTE = {{ 'true' if can_redistribute else 'false' }};
   var delId = null;
+
+  function openTeardown(id, name, host, port, user) {
+    document.getElementById("td-name").textContent = name;
+    document.getElementById("td-host").value = host || "";
+    document.getElementById("td-port").value = port || 22;
+    document.getElementById("td-user").value = user || "root";
+    document.getElementById("td-form").action = "/servers/" + id + "/teardown";
+    document.getElementById("td-overlay").classList.add("open");
+  }
+  function closeTeardown() {
+    document.getElementById("td-overlay").classList.remove("open");
+  }
+  document.getElementById("td-overlay").addEventListener("click", function (e) {
+    if (e.target === this) closeTeardown();
+  });
+  document.getElementById("td-form").addEventListener("submit", function (e) {
+    if (!confirm("Полностью снести агента с этой машины? Файлы и код будут удалены.")) e.preventDefault();
+  });
 
   function openDelete(id, name, videos) {
     delId = id;

@@ -59,7 +59,7 @@ from app.db.models import (
     Worker,
     WorkerMetric,
 )
-from app.db.session import get_session
+from app.db.session import get_session, get_sessionmaker
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import JobCreate
 
@@ -238,12 +238,22 @@ async def _servers_context(session: AsyncSession) -> dict:
                 )
             )
         ).scalar_one()
+    # SSH-deployed servers (matched by name) can be fully torn down from the host.
+    deps = (await session.execute(select(AgentDeployment))).scalars().all()
+    by_name = {d.worker_name: d for d in deps}
+    deployed: dict[int, dict] = {}
+    for w in workers:
+        d = by_name.get(w.name)
+        if d is not None:
+            deployed[w.id] = {"ssh_host": d.ssh_host, "ssh_port": d.ssh_port, "ssh_user": d.ssh_user}
+
     online = sum(1 for w in workers if w.state == "online")
     return {
         "workers": list(workers),
         "metrics": metrics,
         "videos": videos,
         "used_bytes": used_bytes,
+        "deployed": deployed,
         # Redistribution needs at least one other online server to receive the work.
         "can_redistribute": online > 1,
     }
@@ -367,6 +377,69 @@ async def deploy_log_fragment(dep_id: str):
     if dep is None:
         return JSONResponse({"status": "error", "lines": ["развёртывание не найдено"]}, status_code=404)
     return JSONResponse({"status": dep.status, "lines": dep.lines})
+
+
+async def _run_teardown(dep_id: str, params, worker_id: int, worker_name: str) -> None:
+    """Tear the agent down on the host; on success drop its DB rows too."""
+    try:
+        code = await deployer.teardown(params, lambda line: deployments.append(dep_id, line))
+        deployments.finish(dep_id, code == 0)
+        if code == 0:
+            async with get_sessionmaker()() as session:
+                await session.execute(
+                    AgentDeployment.__table__.delete().where(
+                        AgentDeployment.worker_name == worker_name
+                    )
+                )
+                worker = await session.get(Worker, worker_id)
+                if worker is not None:
+                    await session.delete(worker)
+                await session.commit()
+            deployments.append(dep_id, "Сервер удалён из системы.")
+    except Exception as exc:  # noqa: BLE001
+        deployments.append(dep_id, f"ОШИБКА: {exc}")
+        deployments.finish(dep_id, False)
+    bus.publish()
+
+
+@router.post("/servers/{worker_id}/teardown",
+             dependencies=[Depends(require_role("administrator"))])
+async def server_teardown(
+    worker_id: int,
+    ssh_key: str = Form(...),
+    ssh_host: str = Form(""),
+    ssh_port: int = Form(22),
+    ssh_user: str = Form("root"),
+    session: AsyncSession = Depends(get_session),
+):
+    worker = await session.get(Worker, worker_id)
+    if worker is None:
+        return RedirectResponse("/servers?error=сервер+не+найден", status_code=303)
+    dep_row = (
+        await session.execute(
+            select(AgentDeployment).where(AgentDeployment.worker_name == worker.name)
+        )
+    ).scalars().first()
+    if dep_row is None:
+        return RedirectResponse("/servers?error=сервер+развёрнут+не+по+SSH", status_code=303)
+    if not ssh_key.strip():
+        return RedirectResponse("/servers?error=нужен+SSH-ключ", status_code=303)
+
+    env = {
+        "INSTALL_DIR": dep_row.install_dir,
+        "SERVICE_NAME": dep_row.service_name,
+        "VIDHIVE_STORAGE_PATH": dep_row.storage_path,
+    }
+    params = deployer.DeployParams(
+        ssh_host=(ssh_host.strip() or dep_row.ssh_host),
+        ssh_port=ssh_port or dep_row.ssh_port,
+        ssh_user=(ssh_user.strip() or dep_row.ssh_user),
+        ssh_key=ssh_key,
+        env=env,
+    )
+    dep = deployments.new_deployment("teardown", worker.name)
+    asyncio.create_task(_run_teardown(dep.id, params, worker.id, worker.name))
+    return RedirectResponse(f"/servers/deploy/{dep.id}", status_code=303)
 
 
 async def _user_count(session: AsyncSession) -> int:
