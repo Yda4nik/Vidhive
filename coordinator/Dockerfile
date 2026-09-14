@@ -13,6 +13,8 @@ COPY coordinator/requirements.txt /srv/coordinator/requirements.txt
 RUN pip install --no-cache-dir -r /srv/coordinator/requirements.txt
 
 COPY coordinator /srv/coordinator
+# Agent deploy/teardown scripts the coordinator ships to remote hosts over SSH.
+COPY deploy/agent-bootstrap.sh deploy/agent-teardown.sh /srv/deploy/
 WORKDIR /srv/coordinator
 RUN chmod +x entrypoint.sh
 
