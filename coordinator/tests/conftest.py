@@ -19,6 +19,9 @@ sys.path.insert(0, str(ROOT))
 
 DB_FILE = ROOT / "tests" / "_test.db"
 os.environ["VIDHIVE_DATABASE_URL"] = f"sqlite+aiosqlite:///{DB_FILE.as_posix()}"
+os.environ["VIDHIVE_SECRET_KEY"] = "test-secret"
+os.environ["VIDHIVE_ADMIN_USER"] = "tester-admin"
+os.environ["VIDHIVE_ADMIN_PASSWORD"] = "adminpass"
 
 from sqlalchemy import create_engine  # noqa: E402
 

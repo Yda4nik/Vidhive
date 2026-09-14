@@ -23,6 +23,12 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    # Access control (all from env; empty admin/token = feature effectively off).
+    secret_key: str = "dev-insecure-change-me"
+    agent_token: str = ""
+    admin_user: str = ""
+    admin_password: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

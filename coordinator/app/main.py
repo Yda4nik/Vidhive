@@ -72,6 +72,13 @@ async def _completion_sweeper() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings = get_settings()
+    async with get_sessionmaker()() as session:
+        from app.services import auth
+
+        await auth.seed_roles(session)
+        await auth.ensure_bootstrap_admin(session, settings.admin_user, settings.admin_password)
+        await session.commit()
     task = asyncio.create_task(_completion_sweeper())
     try:
         yield
