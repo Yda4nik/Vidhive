@@ -15,8 +15,11 @@ from vidhive_common.schemas import (
 
 
 class CoordinatorClient:
-    def __init__(self, base_url: str, timeout: float = 15.0) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout)
+    def __init__(self, base_url: str, timeout: float = 15.0, agent_token: str = "") -> None:
+        headers = {"X-Agent-Token": agent_token} if agent_token else {}
+        self._client = httpx.AsyncClient(
+            base_url=base_url.rstrip("/"), timeout=timeout, headers=headers
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()

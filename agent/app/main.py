@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(level=settings.log_level)
 
     http = httpx.AsyncClient(timeout=settings.check_timeout)
-    client = CoordinatorClient(settings.coordinator_url)
+    client = CoordinatorClient(settings.coordinator_url, agent_token=settings.agent_token)
     limiter = AsyncRateLimiter(settings.rate_limit_rps)
     runner = WorkerRunner(settings, client, Checker(settings, http, limiter=limiter))
     app.state.runner = runner

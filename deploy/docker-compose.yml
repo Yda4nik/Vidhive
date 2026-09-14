@@ -23,6 +23,11 @@ services:
       dockerfile: coordinator/Dockerfile
     environment:
       VIDHIVE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vidhive}:${POSTGRES_PASSWORD:-vidhive}@postgres:5432/${POSTGRES_DB:-vidhive}
+      # Access control (see deploy/.env.example). Empty admin/token = feature off.
+      VIDHIVE_SECRET_KEY: ${VIDHIVE_SECRET_KEY:-dev-insecure-change-me}
+      VIDHIVE_ADMIN_USER: ${VIDHIVE_ADMIN_USER:-}
+      VIDHIVE_ADMIN_PASSWORD: ${VIDHIVE_ADMIN_PASSWORD:-}
+      VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,6 +66,7 @@ services:
       # overrides one (individual wins over global — spec section 4).
       VIDHIVE_THREADS: ${AGENT_01_THREADS:-${AGENT_THREADS:-34}}
       VIDHIVE_STORAGE_PATH: /data/videos
+      VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
     volumes:
       - videos-01:/data/videos
     depends_on:
@@ -80,6 +86,7 @@ services:
       VIDHIVE_WORKER_NAME: agent-02
       VIDHIVE_THREADS: ${AGENT_02_THREADS:-${AGENT_THREADS:-33}}
       VIDHIVE_STORAGE_PATH: /data/videos
+      VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
     volumes:
       - videos-02:/data/videos
     depends_on:
@@ -99,6 +106,7 @@ services:
       VIDHIVE_WORKER_NAME: agent-03
       VIDHIVE_THREADS: ${AGENT_03_THREADS:-${AGENT_THREADS:-33}}
       VIDHIVE_STORAGE_PATH: /data/videos
+      VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
     volumes:
       - videos-03:/data/videos
     depends_on:

@@ -15,7 +15,7 @@ from app.core.sources import template_for
 from app.db.models import Item, Job, JobTarget, RangeChunk, Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
-from app.services.auth import require_role
+from app.services.auth import require_agent_token, require_role
 from app.services.events import log_event
 from vidhive_common.enums import ChunkStatus, ItemStatus, JobState, WorkerState
 from vidhive_common.schemas import (
@@ -41,7 +41,8 @@ async def _get_worker_or_404(session: AsyncSession, worker_id: int) -> Worker:
     return worker
 
 
-@router.post("/register", response_model=WorkerOut)
+@router.post("/register", response_model=WorkerOut,
+             dependencies=[Depends(require_agent_token)])
 async def register_worker(
     payload: WorkerRegister, session: AsyncSession = Depends(get_session)
 ) -> Worker:
@@ -191,7 +192,8 @@ async def delete_worker(
     return Ack()
 
 
-@router.post("/{worker_id}/heartbeat", response_model=Ack)
+@router.post("/{worker_id}/heartbeat", response_model=Ack,
+             dependencies=[Depends(require_agent_token)])
 async def heartbeat(
     worker_id: int,
     payload: Heartbeat,
@@ -222,7 +224,8 @@ async def heartbeat(
     return Ack()
 
 
-@router.post("/{worker_id}/lease", response_model=ChunkLease)
+@router.post("/{worker_id}/lease", response_model=ChunkLease,
+             dependencies=[Depends(require_agent_token)])
 async def lease(
     worker_id: int,
     payload: LeaseRequest,
@@ -248,7 +251,8 @@ async def lease(
     )
 
 
-@router.post("/{worker_id}/progress", response_model=Ack)
+@router.post("/{worker_id}/progress", response_model=Ack,
+             dependencies=[Depends(require_agent_token)])
 async def progress(
     worker_id: int,
     report: ProgressReport,
@@ -263,7 +267,8 @@ async def progress(
     return Ack()
 
 
-@router.post("/{worker_id}/complete", response_model=Ack)
+@router.post("/{worker_id}/complete", response_model=Ack,
+             dependencies=[Depends(require_agent_token)])
 async def complete(
     worker_id: int,
     payload: ChunkComplete,
@@ -279,7 +284,8 @@ async def complete(
     return Ack()
 
 
-@router.post("/{worker_id}/fail", response_model=Ack)
+@router.post("/{worker_id}/fail", response_model=Ack,
+             dependencies=[Depends(require_agent_token)])
 async def fail(
     worker_id: int,
     payload: ChunkComplete,

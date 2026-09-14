@@ -10,6 +10,8 @@ class Settings(BaseSettings):
 
     # How the agent reaches the coordinator.
     coordinator_url: str = "http://coordinator:8000"
+    # Shared secret sent to the coordinator's machine endpoints (empty = none).
+    agent_token: str = ""
 
     # Identity and resources of this worker.
     worker_name: str = "agent-local"
