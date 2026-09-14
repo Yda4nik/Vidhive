@@ -67,6 +67,28 @@ class UserRole(Base):
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
 
 
+class AgentDeployment(Base):
+    """Record of an agent we installed on a remote host over SSH.
+
+    Holds only non-secret connection data (never the key/password) so the
+    teardown form can pre-fill host/port/user and know what/where to remove.
+    Linked to the worker by name once the agent registers.
+    """
+
+    __tablename__ = "agent_deployments"
+
+    id: Mapped[int] = _pk()
+    worker_id: Mapped[int | None] = mapped_column(ForeignKey("workers.id", ondelete="SET NULL"))
+    worker_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    ssh_host: Mapped[str] = mapped_column(String(255), nullable=False)
+    ssh_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
+    ssh_user: Mapped[str] = mapped_column(String(150), nullable=False)
+    install_dir: Mapped[str] = mapped_column(String(500), nullable=False)
+    service_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = _created()
+
+
 class Invite(Base):
     """A time-limited self-registration link. Registering through it always
     grants the minimal ``viewer`` role; an admin promotes the user afterwards."""
