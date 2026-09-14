@@ -1,0 +1,41 @@
+{# Detailed per-server table — re-rendered live on an SSE event. #}
+<div id="srv-table">
+{% if workers %}
+  <div style="overflow-x:auto">
+  <table>
+    <thead>
+      <tr>
+        <th>Имя</th><th>Состояние</th><th>Хост</th><th>Версия</th><th>Потоки</th>
+        <th>CPU</th><th>RAM</th><th>Диск своб.</th><th>Видео</th><th>Занято</th>
+        <th>Хранилище</th><th>Последний сигнал</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in workers %}
+      {% set m = metrics.get(w.id) %}
+      <tr>
+        <td>{{ w.name }}</td>
+        <td><span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span></td>
+        <td class="muted">{{ w.host or "—" }}</td>
+        <td class="muted">{{ w.agent_version or "—" }}</td>
+        <td>{{ w.threads or "—" }}</td>
+        <td class="muted">{{ (m.cpu_percent ~ "%") if m and m.cpu_percent is not none else "—" }}</td>
+        <td class="muted">{{ ((m.ram_used_mb // 1024) ~ "/" ~ (m.ram_total_mb // 1024) ~ " ГБ") if m and m.ram_total_mb else "—" }}</td>
+        <td class="muted">{{ (m.disk_free_gb ~ " ГБ") if m and m.disk_free_gb is not none else "—" }}</td>
+        <td>{{ videos.get(w.id, 0) }}</td>
+        <td class="muted">{{ used_bytes.get(w.id, 0)|hsize }}</td>
+        <td class="muted" title="{{ w.storage_path or '' }}">{{ w.storage_path or "—" }}</td>
+        <td class="muted">{{ w.last_heartbeat_at.strftime("%Y-%m-%d %H:%M") if w.last_heartbeat_at else "—" }}</td>
+        <td style="white-space:nowrap">
+          <button class="del" title="Удалить сервер"
+                  onclick="openDelete({{ w.id }}, '{{ w.name|e }}', {{ videos.get(w.id, 0) }})">🗑</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% else %}
+  <p class="empty">Серверы ещё не подключены. Агент регистрируется сам при запуске.</p>
+{% endif %}
+</div>

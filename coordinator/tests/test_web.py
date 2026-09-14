@@ -216,9 +216,74 @@ def test_jobs_fragment_renders(client):
     assert "livejob" in r.text
 
 
-def test_servers_page_removed(client):
-    # The Servers page was merged into the dashboard; the route is gone.
-    assert client.get("/servers").status_code == 404
+def test_servers_management_page_renders(client):
+    # /servers is now the detailed server-management page (reached via the ⚙ button).
+    client.post("/api/workers/register", json={"name": "agent-01", "threads": 8})
+    r = client.get("/servers")
+    assert r.status_code == 200
+    assert "Управление серверами" in r.text
+    assert "agent-01" in r.text
+
+
+def _complete_one(client, worker_name, external_id):
+    """Register a worker and have it download one identifier; return its id."""
+    wid = client.post("/api/workers/register", json={"name": worker_name}).json()["id"]
+    # A heartbeat with metrics, so deletion must cascade worker_metrics too.
+    client.post(
+        f"/api/workers/{wid}/heartbeat",
+        json={"cpu_percent": 10.0, "disk_free_gb": 500.0, "active_checks": 1, "active_downloads": 1},
+    )
+    job = client.post(
+        "/api/jobs", json={"range_start": external_id, "range_end": external_id, "chunk_size": 1}
+    ).json()
+    client.post(f"/api/jobs/{job['id']}/start")
+    lease = client.post(
+        f"/api/workers/{wid}/lease", json={"worker_id": wid, "lease_seconds": 120}
+    ).json()
+    client.post(
+        f"/api/workers/{wid}/progress",
+        json={
+            "chunk_id": lease["chunk_id"],
+            "next_id": external_id + 1,
+            "items": [{
+                "external_id": external_id, "status": "completed", "title": f"clip{external_id}",
+                "storage_path": f"/data/videos/0/{external_id}/video.mp4",
+            }],
+        },
+    )
+    return wid
+
+
+def test_delete_server_purges_its_videos(client, raw_sql):
+    wid = _complete_one(client, "agent-01", 5)
+    assert raw_sql("SELECT COUNT(*) FROM items WHERE status='completed'")[0][0] == 1
+
+    assert client.request("DELETE", f"/api/workers/{wid}?mode=purge").status_code == 200
+    assert raw_sql("SELECT COUNT(*) FROM workers WHERE id=?", (wid,))[0][0] == 0
+    # The video it held is gone from the catalogue.
+    assert raw_sql("SELECT COUNT(*) FROM items WHERE status='completed'")[0][0] == 0
+
+
+def test_delete_server_redistribute_requeues_then_removes(client, raw_sql):
+    wid = _complete_one(client, "agent-01", 5)
+    client.post("/api/workers/register", json={"name": "agent-02"})  # a surviving online server
+
+    assert client.request("DELETE", f"/api/workers/{wid}?mode=redistribute").status_code == 200
+    # The server is gone…
+    assert raw_sql("SELECT COUNT(*) FROM workers WHERE id=?", (wid,))[0][0] == 0
+    # …and a re-download job was queued so a surviving server fetches the video again.
+    job = raw_sql("SELECT id FROM jobs WHERE name LIKE 'Перенос%'")
+    assert len(job) == 1
+    chunks = raw_sql(
+        "SELECT range_start, range_end, status FROM range_chunks WHERE job_id=?", (job[0][0],)
+    )
+    assert chunks == [(5, 5, "pending")]
+
+
+def test_delete_server_redistribute_needs_another_server(client):
+    wid = _complete_one(client, "agent-01", 5)  # the only server online
+    r = client.request("DELETE", f"/api/workers/{wid}?mode=redistribute")
+    assert r.status_code == 409
 
 
 def test_jobs_page_hosts_the_add_form(client):

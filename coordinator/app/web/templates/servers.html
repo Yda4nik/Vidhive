@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — серверы{% endblock %}
+{% block content %}
+<style>
+  .del { background:none; border:none; cursor:pointer; font-size:20px; color:var(--bad);
+    padding:2px 8px; border-radius:8px; }
+  .del:hover { background:rgba(224,90,90,.12); }
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none;
+    align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .overlay.open { display:flex; }
+  .modal { background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:22px; max-width:480px; width:100%; }
+  .modal h3 { margin:0 0 6px; font-size:17px; }
+  .modal p { margin:0 0 16px; color:var(--muted); font-size:14px; }
+  .choice { display:block; width:100%; text-align:left; margin-bottom:10px; padding:12px 14px;
+    border-radius:10px; border:1px solid var(--line); background:var(--btn-bg); color:var(--txt);
+    cursor:pointer; font-size:14px; }
+  .choice:hover:not(:disabled) { border-color:var(--accent); }
+  .choice:disabled { opacity:.45; cursor:not-allowed; }
+  .choice b { display:block; margin-bottom:2px; }
+  .choice .sub { color:var(--muted); font-size:12px; }
+  .choice.danger:hover:not(:disabled) { border-color:var(--bad); }
+</style>
+
+{% if error %}
+<div class="card" style="border-color:var(--bad)">
+  <span style="color:var(--bad)">⚠ {{ error }}</span>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px">
+    <h2 style="margin:0">Управление серверами</h2>
+    <a class="btn" href="/">← на панель</a>
+  </div>
+  {% include "_servers_table.html" %}
+  <p class="muted tiny" style="margin-top:12px">
+    Серверы добавляются в сеть автоматически: агент при запуске сам регистрируется у координатора.
+  </p>
+</div>
+
+{# Delete dialog — kept outside #srv-table so a live refresh never closes it. #}
+<div class="overlay" id="del-overlay">
+  <div class="modal">
+    <h3>Удалить сервер «<span id="del-name"></span>»?</h3>
+    <p id="del-note"></p>
+    <form method="post" id="del-form">
+      <input type="hidden" name="mode" id="del-mode" value="purge">
+      <button type="button" class="choice" id="del-redist" onclick="chooseDelete('redistribute')">
+        <b>Распределить по другим и удалить</b>
+        <span class="sub">Видео заново скачиваются на другой сервер, затем этот удаляется. Файлы этого сервера стираются.</span>
+      </button>
+      <button type="button" class="choice danger" onclick="chooseDelete('purge')">
+        <b>Удалить вместе с данными</b>
+        <span class="sub">Сервер и все его скачанные файлы удаляются безвозвратно.</span>
+      </button>
+      <div style="text-align:right; margin-top:6px">
+        <span class="btn" onclick="closeDelete()">Отмена</span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  var CAN_REDISTRIBUTE = {{ 'true' if can_redistribute else 'false' }};
+  var delId = null;
+
+  function openDelete(id, name, videos) {
+    delId = id;
+    document.getElementById("del-name").textContent = name;
+    document.getElementById("del-note").textContent =
+      "На сервере " + videos + " скачанных видео.";
+    var rb = document.getElementById("del-redist");
+    rb.disabled = !CAN_REDISTRIBUTE;
+    rb.title = CAN_REDISTRIBUTE ? "" : "Нужен хотя бы ещё один сервер на связи";
+    document.getElementById("del-overlay").classList.add("open");
+  }
+  function closeDelete() {
+    document.getElementById("del-overlay").classList.remove("open");
+    delId = null;
+  }
+  function chooseDelete(mode) {
+    if (delId === null) return;
+    var human = mode === "redistribute"
+      ? "Распределить видео по другим серверам и удалить этот сервер?"
+      : "Удалить сервер вместе со всеми его файлами? Это необратимо.";
+    if (!confirm(human)) return;
+    var form = document.getElementById("del-form");
+    form.action = "/servers/" + delId + "/delete";
+    document.getElementById("del-mode").value = mode;
+    form.submit();
+  }
+  // Click on the dim backdrop closes the dialog.
+  document.getElementById("del-overlay").addEventListener("click", function (e) {
+    if (e.target === this) closeDelete();
+  });
+
+  // Live refresh: swap the table on a real-time event; the dialog stays put.
+  window.liveRefresh = function () {
+    fetch("/fragments/servers")
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var nw = doc.getElementById("srv-table"), cur = document.getElementById("srv-table");
+        if (nw && cur) cur.innerHTML = nw.innerHTML;
+      });
+  };
+</script>
+{% endblock %}

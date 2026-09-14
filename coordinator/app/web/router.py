@@ -32,6 +32,7 @@ from app.api.jobs import (
     stop_job,
 )
 from app.api.library import get_or_create_favorites
+from app.api.workers import delete_worker
 from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
     FileRecord,
@@ -190,6 +191,74 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
 async def dashboard_fragment(request: Request, session: AsyncSession = Depends(get_session)):
     """The live dashboard body, re-fetched on a real-time event."""
     return _page(request, "_dashboard.html", await _dashboard_context(session))
+
+
+async def _servers_context(session: AsyncSession) -> dict:
+    """Full per-server detail for the management page."""
+    workers = (await session.execute(select(Worker).order_by(Worker.name))).scalars().all()
+    metrics: dict[int, WorkerMetric | None] = {}
+    videos: dict[int, int] = {}
+    used_bytes: dict[int, int] = {}
+    for w in workers:
+        metrics[w.id] = (
+            await session.execute(
+                select(WorkerMetric)
+                .where(WorkerMetric.worker_id == w.id)
+                .order_by(WorkerMetric.captured_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        videos[w.id] = (
+            await session.execute(
+                select(func.count())
+                .select_from(Item)
+                .where(Item.worker_id == w.id)
+                .where(Item.status == ItemStatus.COMPLETED.value)
+            )
+        ).scalar_one()
+        used_bytes[w.id] = (
+            await session.execute(
+                select(func.coalesce(func.sum(FileRecord.size_bytes), 0)).where(
+                    FileRecord.worker_name == w.name
+                )
+            )
+        ).scalar_one()
+    online = sum(1 for w in workers if w.state == "online")
+    return {
+        "workers": list(workers),
+        "metrics": metrics,
+        "videos": videos,
+        "used_bytes": used_bytes,
+        # Redistribution needs at least one other online server to receive the work.
+        "can_redistribute": online > 1,
+    }
+
+
+@router.get("/servers", response_class=HTMLResponse)
+async def servers_page(
+    request: Request, error: str = "", session: AsyncSession = Depends(get_session)
+):
+    ctx = await _servers_context(session)
+    ctx["error"] = error
+    return _page(request, "servers.html", ctx)
+
+
+@router.get("/fragments/servers", response_class=HTMLResponse)
+async def servers_fragment(request: Request, session: AsyncSession = Depends(get_session)):
+    return _page(request, "_servers_table.html", await _servers_context(session))
+
+
+@router.post("/servers/{worker_id}/delete")
+async def server_delete(
+    worker_id: int,
+    mode: str = Form("purge"),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        await delete_worker(worker_id, mode, session)
+    except HTTPException as exc:
+        return RedirectResponse(url=f"/servers?error={quote(str(exc.detail))}", status_code=303)
+    return RedirectResponse(url="/servers", status_code=303)
 
 
 @router.get("/events/stream")

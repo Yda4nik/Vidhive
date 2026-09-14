@@ -1,4 +1,4 @@
-{# Live dashboard body — polled by HTMX every 5 seconds. #}
+{# Live dashboard body — re-rendered on a real-time (SSE) event. #}
 <div class="card">
   <h2>Сводка</h2>
   <div class="stats">
@@ -10,6 +10,38 @@
       <span class="k">всего загружено{% if total_bytes %} · {{ total_bytes|bexact }}{% endif %}</span>
     </div>
   </div>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px">
+    <h2 style="margin:0">Рабочие серверы</h2>
+    <a class="btn" href="/servers" title="Управление серверами" aria-label="Управление серверами"
+       style="text-decoration:none">⚙ Управление</a>
+  </div>
+  {% if workers %}
+    <table>
+      <thead>
+        <tr><th>Имя</th><th>Состояние</th><th>Потоки</th><th>CPU</th><th>RAM</th><th>Диск своб.</th><th>Проверок</th><th>Загрузок</th></tr>
+      </thead>
+      <tbody>
+        {% for w in workers %}
+        {% set m = metrics.get(w.id) %}
+        <tr>
+          <td>{{ w.name }}</td>
+          <td><span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span></td>
+          <td>{{ w.threads or "—" }}</td>
+          <td>{{ (m.cpu_percent ~ "%") if m and m.cpu_percent is not none else "—" }}</td>
+          <td>{{ ((m.ram_used_mb // 1024) ~ "/" ~ (m.ram_total_mb // 1024) ~ " ГБ") if m and m.ram_total_mb else "—" }}</td>
+          <td>{{ (m.disk_free_gb ~ " ГБ") if m and m.disk_free_gb is not none else "—" }}</td>
+          <td>{{ m.active_checks if m and m.active_checks is not none else "—" }}</td>
+          <td>{{ m.active_downloads if m and m.active_downloads is not none else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">Серверы ещё не подключены.</p>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -51,33 +83,5 @@
     </table>
   {% else %}
     <p class="empty">Заданий пока нет. <a href="/add">Создайте первое.</a></p>
-  {% endif %}
-</div>
-
-<div class="card">
-  <h2>Рабочие серверы</h2>
-  {% if workers %}
-    <table>
-      <thead>
-        <tr><th>Имя</th><th>Состояние</th><th>Потоки</th><th>CPU</th><th>RAM</th><th>Диск своб.</th><th>Проверок</th><th>Загрузок</th></tr>
-      </thead>
-      <tbody>
-        {% for w in workers %}
-        {% set m = metrics.get(w.id) %}
-        <tr>
-          <td>{{ w.name }}</td>
-          <td><span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span></td>
-          <td>{{ w.threads or "—" }}</td>
-          <td>{{ (m.cpu_percent ~ "%") if m and m.cpu_percent is not none else "—" }}</td>
-          <td>{{ ((m.ram_used_mb // 1024) ~ "/" ~ (m.ram_total_mb // 1024) ~ " ГБ") if m and m.ram_total_mb else "—" }}</td>
-          <td>{{ (m.disk_free_gb ~ " ГБ") if m and m.disk_free_gb is not none else "—" }}</td>
-          <td>{{ m.active_checks if m and m.active_checks is not none else "—" }}</td>
-          <td>{{ m.active_downloads if m and m.active_downloads is not none else "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p class="empty">Серверы ещё не подключены.</p>
   {% endif %}
 </div>

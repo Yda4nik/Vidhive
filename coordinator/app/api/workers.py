@@ -3,18 +3,20 @@
 This is the coordinator side of the block protocol. Agents (stage 3) drive it.
 """
 
+import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.sources import template_for
-from app.db.models import Job, Worker, WorkerMetric
+from app.db.models import Item, Job, JobTarget, RangeChunk, Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
 from app.services.events import log_event
-from vidhive_common.enums import ChunkStatus, WorkerState
+from vidhive_common.enums import ChunkStatus, ItemStatus, JobState, WorkerState
 from vidhive_common.schemas import (
     Ack,
     ChunkComplete,
@@ -25,6 +27,8 @@ from vidhive_common.schemas import (
     WorkerOut,
     WorkerRegister,
 )
+
+log = logging.getLogger("vidhive.workers")
 
 router = APIRouter(prefix="/api/workers", tags=["workers"])
 
@@ -78,6 +82,110 @@ async def list_workers(session: AsyncSession = Depends(get_session)) -> list[Wor
 @router.get("/{worker_id}", response_model=WorkerOut)
 async def get_worker(worker_id: int, session: AsyncSession = Depends(get_session)) -> Worker:
     return await _get_worker_or_404(session, worker_id)
+
+
+async def _redistribute_worker_videos(session: AsyncSession, worker: Worker, items: list[Item]) -> int:
+    """Re-queue the identifiers a departing worker holds so another server fetches them again.
+
+    Files can't be moved between machines, but we still have the source ids: a fresh
+    re-download job (one single-id target per video, grouped by source) lets a surviving
+    online worker pull the same videos onto itself. The old copy is removed afterwards.
+    """
+    ids_by_source: dict[str, set[int]] = {}
+    for it in items:
+        job = await session.get(Job, it.job_id)
+        source = job.source if job else "kinescope"
+        ids_by_source.setdefault(source, set()).add(it.external_id)
+
+    total = 0
+    for source, ids in ids_by_source.items():
+        new_job = Job(name=f"Перенос с «{worker.name}»", source=source)
+        session.add(new_job)
+        await session.flush()
+        for ext in sorted(ids):
+            session.add(JobTarget(job_id=new_job.id, range_start=ext, range_end=ext, url=None))
+        await session.flush()
+        await scheduler.initialize_job_chunks(session, new_job)
+        new_job.state = JobState.RUNNING.value
+        total += len(ids)
+    return total
+
+
+@router.delete("/{worker_id}", response_model=Ack)
+async def delete_worker(
+    worker_id: int,
+    mode: str = Query("purge", pattern="^(purge|redistribute)$"),
+    session: AsyncSession = Depends(get_session),
+) -> Ack:
+    """Remove a server from the network.
+
+    * ``purge``        — delete the server together with every file it downloaded.
+    * ``redistribute`` — first re-queue its videos so a surviving online server
+      re-downloads them, then remove the server and its files.
+    """
+    worker = await _get_worker_or_404(session, worker_id)
+
+    completed = (
+        await session.execute(
+            select(Item)
+            .where(Item.worker_id == worker.id)
+            .where(Item.status == ItemStatus.COMPLETED.value)
+        )
+    ).scalars().all()
+
+    requeued = 0
+    if mode == "redistribute":
+        others = (
+            await session.execute(
+                select(func.count())
+                .select_from(Worker)
+                .where(Worker.id != worker.id)
+                .where(Worker.state == WorkerState.ONLINE.value)
+            )
+        ).scalar_one()
+        if not others:
+            raise HTTPException(
+                status_code=409,
+                detail="нет других серверов в сети для распределения — используйте удаление с данными",
+            )
+        requeued = await _redistribute_worker_videos(session, worker, completed)
+
+    # Delete the physical files on the agent (best-effort — it may already be offline).
+    if worker.agent_url:
+        base = worker.agent_url.rstrip("/")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for it in completed:
+                try:
+                    await client.delete(f"{base}/files/{it.external_id}")
+                except httpx.HTTPError as exc:
+                    log.warning("agent file delete failed for %s: %s", it.external_id, exc)
+
+    # Return any chunk this worker was holding to the queue so others pick it up now.
+    await session.execute(
+        update(RangeChunk)
+        .where(RangeChunk.leased_by == worker.id)
+        .where(RangeChunk.status == ChunkStatus.LEASED.value)
+        .values(status=ChunkStatus.PENDING.value, leased_by=None, lease_expires_at=None)
+    )
+
+    # Drop this worker's completed items (and their metadata/downloads/files/library rows).
+    for it in completed:
+        await session.delete(it)
+
+    log_event(
+        session,
+        component="workers",
+        operation="delete",
+        result=mode,
+        worker_id=worker.id,
+        message=(
+            f"{worker.name} removed ({mode}); {len(completed)} file(s) purged"
+            + (f", {requeued} re-queued" if mode == "redistribute" else "")
+        ),
+    )
+    await session.delete(worker)  # cascades metrics; SET NULL on any remaining references
+    await session.commit()
+    return Ack()
 
 
 @router.post("/{worker_id}/heartbeat", response_model=Ack)

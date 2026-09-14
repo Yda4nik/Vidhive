@@ -84,7 +84,11 @@ class Worker(Base):
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     registered_at: Mapped[datetime] = _created()
 
-    metrics: Mapped[list[WorkerMetric]] = relationship(back_populates="worker")
+    # passive_deletes: let the DB's ON DELETE CASCADE drop the metrics, instead of
+    # the ORM trying to null worker_metrics.worker_id (which is NOT NULL) first.
+    metrics: Mapped[list[WorkerMetric]] = relationship(
+        back_populates="worker", passive_deletes=True
+    )
 
 
 class WorkerMetric(Base):

@@ -10,6 +10,7 @@ import os
 import pathlib
 import sqlite3
 import sys
+import time
 
 import pytest
 
@@ -25,10 +26,27 @@ from app.db.base import Base  # noqa: E402
 import app.db.models  # noqa: E402,F401  (registers tables)
 
 
+def _unlink_when_free(path: pathlib.Path, tries: int = 40) -> None:
+    """Delete the DB file, waiting out a lingering handle.
+
+    aiosqlite closes its connection on a background thread, so just after the
+    previous test disposes the engine the file can stay briefly locked on
+    Windows (WinError 32). Unlinking an open file never blocks on Linux.
+    """
+    for _ in range(tries):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    path.unlink()  # give up waiting and surface the real error
+
+
 @pytest.fixture()
 def client():
-    if DB_FILE.exists():
-        DB_FILE.unlink()
+    _unlink_when_free(DB_FILE)
     sync_engine = create_engine(f"sqlite:///{DB_FILE.as_posix()}")
     Base.metadata.create_all(sync_engine)
     sync_engine.dispose()
@@ -45,6 +63,20 @@ def client():
 
     with TestClient(app) as c:
         yield c
+
+    # Release the SQLite file handle so the next test can recreate the DB.
+    # (Unlinking an open file is fine on Linux but fails on Windows — WinError 32.)
+    # aiosqlite keeps its connection on a background thread, so it needs a real
+    # async dispose, not just disposing the sync pool.
+    import asyncio
+    import gc
+
+    engine = sess.get_engine()
+    try:
+        asyncio.run(engine.dispose())
+    except Exception:  # noqa: BLE001 - fall back to the sync pool teardown
+        engine.sync_engine.dispose()
+    gc.collect()
 
 
 @pytest.fixture()
