@@ -238,7 +238,8 @@ async def _servers_context(session: AsyncSession) -> dict:
     }
 
 
-@router.get("/servers", response_class=HTMLResponse)
+@router.get("/servers", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("administrator"))])
 async def servers_page(
     request: Request, error: str = "", session: AsyncSession = Depends(get_session)
 ):
@@ -247,12 +248,14 @@ async def servers_page(
     return _page(request, "servers.html", ctx)
 
 
-@router.get("/fragments/servers", response_class=HTMLResponse)
+@router.get("/fragments/servers", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("administrator"))])
 async def servers_fragment(request: Request, session: AsyncSession = Depends(get_session)):
     return _page(request, "_servers_table.html", await _servers_context(session))
 
 
-@router.post("/servers/{worker_id}/delete")
+@router.post("/servers/{worker_id}/delete",
+             dependencies=[Depends(require_role("administrator"))])
 async def server_delete(
     worker_id: int,
     mode: str = Form("purge"),

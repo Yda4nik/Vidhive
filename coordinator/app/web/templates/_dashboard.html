@@ -15,8 +15,10 @@
 <div class="card">
   <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px">
     <h2 style="margin:0">Рабочие серверы</h2>
+    {% if request.state.role == 'administrator' %}
     <a class="btn" href="/servers" title="Управление серверами" aria-label="Управление серверами"
        style="text-decoration:none">⚙ Управление</a>
+    {% endif %}
   </div>
   {% if workers %}
     <table>

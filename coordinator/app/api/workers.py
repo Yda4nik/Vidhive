@@ -15,6 +15,7 @@ from app.core.sources import template_for
 from app.db.models import Item, Job, JobTarget, RangeChunk, Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
+from app.services.auth import require_role
 from app.services.events import log_event
 from vidhive_common.enums import ChunkStatus, ItemStatus, JobState, WorkerState
 from vidhive_common.schemas import (
@@ -73,13 +74,14 @@ async def register_worker(
     return worker
 
 
-@router.get("", response_model=list[WorkerOut])
+@router.get("", response_model=list[WorkerOut], dependencies=[Depends(require_role("viewer"))])
 async def list_workers(session: AsyncSession = Depends(get_session)) -> list[Worker]:
     result = await session.execute(select(Worker).order_by(Worker.name))
     return list(result.scalars().all())
 
 
-@router.get("/{worker_id}", response_model=WorkerOut)
+@router.get("/{worker_id}", response_model=WorkerOut,
+            dependencies=[Depends(require_role("viewer"))])
 async def get_worker(worker_id: int, session: AsyncSession = Depends(get_session)) -> Worker:
     return await _get_worker_or_404(session, worker_id)
 
@@ -111,7 +113,8 @@ async def _redistribute_worker_videos(session: AsyncSession, worker: Worker, ite
     return total
 
 
-@router.delete("/{worker_id}", response_model=Ack)
+@router.delete("/{worker_id}", response_model=Ack,
+               dependencies=[Depends(require_role("administrator"))])
 async def delete_worker(
     worker_id: int,
     mode: str = Query("purge", pattern="^(purge|redistribute)$"),
