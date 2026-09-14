@@ -73,7 +73,13 @@
       <a href="/library">Библиотека</a>
       <a href="/docs" target="_blank" rel="noopener">API</a>
     </nav>
-    <div class="head-right">
+    <div class="head-right" style="gap:10px; align-items:center">
+      {% if request.state.user %}
+        <span class="muted tiny">{{ request.state.user.username }} · {{ request.state.role }}</span>
+        <form method="post" action="/logout" class="inline">
+          <input type="submit" class="btn" value="Выйти">
+        </form>
+      {% endif %}
       <button id="theme-btn" type="button" onclick="toggleTheme()" title="Тема" aria-label="Переключить тему">☀</button>
     </div>
   </header>

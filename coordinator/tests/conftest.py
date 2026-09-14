@@ -47,8 +47,8 @@ def _unlink_when_free(path: pathlib.Path, tries: int = 40) -> None:
     path.unlink()  # give up waiting and surface the real error
 
 
-@pytest.fixture()
-def client():
+def _start_app():
+    """Fresh DB + a TestClient with the app started (lifespan bootstraps roles/admin)."""
     _unlink_when_free(DB_FILE)
     sync_engine = create_engine(f"sqlite:///{DB_FILE.as_posix()}")
     Base.metadata.create_all(sync_engine)
@@ -64,9 +64,10 @@ def client():
 
     from app.main import app
 
-    with TestClient(app) as c:
-        yield c
+    return TestClient(app), sess
 
+
+def _dispose(sess) -> None:
     # Release the SQLite file handle so the next test can recreate the DB.
     # (Unlinking an open file is fine on Linux but fails on Windows — WinError 32.)
     # aiosqlite keeps its connection on a background thread, so it needs a real
@@ -80,6 +81,47 @@ def client():
     except Exception:  # noqa: BLE001 - fall back to the sync pool teardown
         engine.sync_engine.dispose()
     gc.collect()
+
+
+@pytest.fixture()
+def client():
+    """Client logged in as the bootstrap administrator (default for most tests)."""
+    tc, sess = _start_app()
+    with tc as c:
+        c.post("/login", data={"username": "tester-admin", "password": "adminpass"})
+        yield c
+    _dispose(sess)
+
+
+@pytest.fixture()
+def anon_client():
+    """Client with the app started but NOT logged in."""
+    tc, sess = _start_app()
+    with tc as c:
+        yield c
+    _dispose(sess)
+
+
+@pytest.fixture()
+def make_user(raw_sql):
+    """Create a user with a role directly in the DB; returns the username."""
+    from app.services.security import hash_password
+
+    def _make(username: str, password: str, role: str) -> str:
+        raw_sql(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            (username, hash_password(password)),
+        )
+        uid = raw_sql("SELECT id FROM users WHERE username=?", (username,))[0][0]
+        rid = raw_sql("SELECT id FROM roles WHERE name=?", (role,))[0][0]
+        raw_sql("INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)", (uid, rid))
+        return username
+
+    return _make
+
+
+def login(client, username: str, password: str):
+    return client.post("/login", data={"username": username, "password": password})
 
 
 @pytest.fixture()

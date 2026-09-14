@@ -8,9 +8,14 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from urllib.parse import quote
+
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 
 from app.api import health, jobs, library, workers
@@ -18,6 +23,7 @@ from app.core.config import get_settings
 from app.db.models import Job
 from app.db.session import get_sessionmaker
 from app.services import scheduler
+from app.services.auth import AccessError, load_current_user
 from app.services.bus import bus
 from app.web.router import router as web_router
 
@@ -103,6 +109,25 @@ def create_app() -> FastAPI:
         ):
             bus.publish()
         return response
+
+    # Attach the current user to request.state from the session cookie. Added
+    # before SessionMiddleware so that (add_middleware stacks last-added
+    # outermost) SessionMiddleware wraps it and request.session is available.
+    async def _attach_user(request: Request, call_next):
+        await load_current_user(request)
+        return await call_next(request)
+
+    app.add_middleware(BaseHTTPMiddleware, dispatch=_attach_user)
+    app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax")
+
+    @app.exception_handler(AccessError)
+    async def _access_error(request: Request, exc: AccessError):
+        if request.url.path.startswith("/api"):
+            detail = "forbidden" if exc.status_code == 403 else "unauthorized"
+            return JSONResponse({"detail": detail}, status_code=exc.status_code)
+        if exc.status_code == 401:
+            return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
+        return HTMLResponse("<h1>403 — недостаточно прав</h1>", status_code=403)
 
     # API
     app.include_router(health.router)

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — вход{% endblock %}
+{% block content %}
+<div class="card" style="max-width:380px; margin:60px auto">
+  <h2>Вход</h2>
+  {% if error %}<p style="color:var(--bad)">⚠ {{ error }}</p>{% endif %}
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Логин</label>
+    <input type="text" name="username" autofocus>
+    <label>Пароль</label>
+    <input type="password" name="password">
+    <div style="margin-top:16px">
+      <input type="submit" class="btn primary" value="Войти">
+    </div>
+  </form>
+</div>
+{% endblock %}

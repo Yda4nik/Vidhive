@@ -33,6 +33,9 @@ from app.api.jobs import (
 )
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
+from app.db.models import User
+from app.services.auth import require_role, role_of
+from app.services.security import verify_password
 from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
     FileRecord,
@@ -259,6 +262,34 @@ async def server_delete(
     except HTTPException as exc:
         return RedirectResponse(url=f"/servers?error={quote(str(exc.detail))}", status_code=303)
     return RedirectResponse(url="/servers", status_code=303)
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: str = "/", error: str = ""):
+    return _page(request, "login.html", {"next": next, "error": error})
+
+
+@router.post("/login")
+async def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+    session: AsyncSession = Depends(get_session),
+):
+    user = (
+        await session.execute(select(User).where(User.username == username))
+    ).scalar_one_or_none()
+    if user is None or not verify_password(password, user.password_hash):
+        return _page(request, "login.html", {"next": next, "error": "Неверный логин или пароль"})
+    request.session["user_id"] = user.id
+    return RedirectResponse(url=next or "/", status_code=303)
+
+
+@router.post("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)
 
 
 @router.get("/events/stream")
