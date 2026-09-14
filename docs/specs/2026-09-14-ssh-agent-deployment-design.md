@@ -36,11 +36,14 @@
 
 ## 4. Форма развёртывания (admin)
 
-Поля: `ssh_host`, `ssh_port` (22), `ssh_user` (root), `ssh_key` (textarea, PEM —
-не хранится); `worker_name` (уникальное), `threads` (8), `storage_path`
-(`/var/lib/vidhive/videos`); `coordinator_url` (предзаполнен), `agent_url`
-(предзаполнен `http://<host>:8100`). Валидация: имя воркера `[A-Za-z0-9_-]`,
-порт 1..65535, путь абсолютный, host непустой.
+Поля: `ssh_host`, `ssh_port` (22), `ssh_user` (root); **вход по паролю
+(`ssh_password`) ИЛИ по ключу (`ssh_key`, PEM)** — при аренде VPS обычно дают
+IP + root-пароль; ни пароль, ни ключ не хранятся; `worker_name` (уникальное),
+`threads` (8), `storage_path` (`/var/lib/vidhive/videos`); `agent_url`
+(необязательно, по умолчанию `http://<host>:8100`). Адрес координатора не
+запрашивается — берётся автоматически из `request.base_url` (тот адрес, по
+которому админ открыл веб). Валидация: имя воркера `[A-Za-z0-9_-]`, порт
+1..65535, путь абсолютный, host непустой, задан пароль или ключ.
 
 ## 5. Bootstrap-скрипт (`deploy/agent-bootstrap.sh`)
 

@@ -40,7 +40,8 @@ class DeployParams:
     ssh_host: str
     ssh_port: int
     ssh_user: str
-    ssh_key: str  # PEM private key text — used once, never stored
+    ssh_key: str = ""  # PEM private key text — used once, never stored
+    ssh_password: str = ""  # SSH password (VPS case) — used once, never stored
     env: dict[str, str] = field(default_factory=dict)  # VIDHIVE_* + INSTALL_DIR/etc.
 
 
@@ -52,13 +53,16 @@ def build_env_prefix(env: dict[str, str]) -> str:
 async def run_script(params: DeployParams, script_text: str, on_line: OnLine) -> int:
     prefix = build_env_prefix(params.env)
     command = f"{prefix} bash -s" if prefix else "bash -s"
-    async with asyncssh.connect(
-        params.ssh_host,
-        port=params.ssh_port,
-        username=params.ssh_user,
-        client_keys=[asyncssh.import_private_key(params.ssh_key)],
-        known_hosts=None,  # first contact with a fresh host (trusted lab network)
-    ) as conn:
+    connect_kwargs: dict = {
+        "port": params.ssh_port,
+        "username": params.ssh_user,
+        "known_hosts": None,  # first contact with a fresh host (trusted lab network)
+    }
+    if params.ssh_password:
+        connect_kwargs["password"] = params.ssh_password
+    else:
+        connect_kwargs["client_keys"] = [asyncssh.import_private_key(params.ssh_key)]
+    async with asyncssh.connect(params.ssh_host, **connect_kwargs) as conn:
         proc = await conn.create_process(command, stdin=asyncssh.PIPE, stderr=asyncssh.STDOUT)
         proc.stdin.write(script_text)
         proc.stdin.write_eof()

@@ -100,6 +100,26 @@ def test_run_script_streams_lines_and_returns_code(monkeypatch):
     assert capture["script"] == "echo hi"
 
 
+def test_run_script_uses_password_when_given(monkeypatch):
+    capture = {}
+
+    def fake_connect(host, **kwargs):
+        capture["kwargs"] = kwargs
+        return _FakeConn(capture, ["ok"], 0)
+
+    def no_key(_k):
+        raise AssertionError("import_private_key must not run for password auth")
+
+    monkeypatch.setattr(asyncssh, "connect", fake_connect)
+    monkeypatch.setattr(asyncssh, "import_private_key", no_key)
+
+    params = DeployParams(ssh_host="h", ssh_port=22, ssh_user="root", ssh_password="pw", env={})
+    code = asyncio.run(deployer.run_script(params, "x", lambda _l: None))
+    assert code == 0
+    assert capture["kwargs"].get("password") == "pw"
+    assert "client_keys" not in capture["kwargs"]
+
+
 def test_run_script_propagates_failure(monkeypatch):
     def fake_connect(host, **kwargs):
         return _FakeConn({}, ["boom"], 3)

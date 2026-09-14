@@ -3,7 +3,7 @@ from app.services import deployer
 # No coordinator_url or agent_url: both are derived (coordinator from the request
 # host, agent from the SSH host) — the form no longer asks for the coordinator URL.
 _FORM = {
-    "ssh_host": "1.2.3.4", "ssh_port": "22", "ssh_user": "root", "ssh_key": "KEY",
+    "ssh_host": "1.2.3.4", "ssh_port": "22", "ssh_user": "root", "ssh_password": "secret",
     "worker_name": "agent-04", "threads": "8", "storage_path": "/var/lib/vidhive/videos",
 }
 

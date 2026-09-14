@@ -313,7 +313,8 @@ async def server_deploy(
     ssh_host: str = Form(...),
     ssh_port: int = Form(22),
     ssh_user: str = Form("root"),
-    ssh_key: str = Form(...),
+    ssh_key: str = Form(""),
+    ssh_password: str = Form(""),
     worker_name: str = Form(...),
     threads: int = Form(8),
     storage_path: str = Form(_DEFAULT_STORAGE),
@@ -334,8 +335,8 @@ async def server_deploy(
         errors.append("порт SSH вне диапазона")
     if not storage_path.strip().startswith("/"):
         errors.append("путь хранилища должен быть абсолютным")
-    if not ssh_host or not ssh_key.strip():
-        errors.append("укажите хост и SSH-ключ")
+    if not ssh_host or not (ssh_key.strip() or ssh_password):
+        errors.append("укажите хост и пароль или SSH-ключ")
     if errors:
         return RedirectResponse(f"/servers?error={quote('; '.join(errors))}", status_code=303)
 
@@ -352,8 +353,8 @@ async def server_deploy(
         "SERVICE_NAME": _SERVICE_NAME,
     }
     params = deployer.DeployParams(
-        ssh_host=ssh_host.strip(), ssh_port=ssh_port, ssh_user=ssh_user.strip(),
-        ssh_key=ssh_key, env=env,
+        ssh_host=ssh_host, ssh_port=ssh_port, ssh_user=ssh_user.strip(),
+        ssh_key=ssh_key, ssh_password=ssh_password, env=env,
     )
     session.add(AgentDeployment(
         worker_name=worker_name, ssh_host=ssh_host.strip(), ssh_port=ssh_port,
@@ -412,7 +413,8 @@ async def _run_teardown(dep_id: str, params, worker_id: int, worker_name: str) -
              dependencies=[Depends(require_role("administrator"))])
 async def server_teardown(
     worker_id: int,
-    ssh_key: str = Form(...),
+    ssh_key: str = Form(""),
+    ssh_password: str = Form(""),
     ssh_host: str = Form(""),
     ssh_port: int = Form(22),
     ssh_user: str = Form("root"),
@@ -428,8 +430,8 @@ async def server_teardown(
     ).scalars().first()
     if dep_row is None:
         return RedirectResponse("/servers?error=сервер+развёрнут+не+по+SSH", status_code=303)
-    if not ssh_key.strip():
-        return RedirectResponse("/servers?error=нужен+SSH-ключ", status_code=303)
+    if not (ssh_key.strip() or ssh_password):
+        return RedirectResponse("/servers?error=нужен+пароль+или+SSH-ключ", status_code=303)
 
     env = {
         "INSTALL_DIR": dep_row.install_dir,
@@ -441,6 +443,7 @@ async def server_teardown(
         ssh_port=ssh_port or dep_row.ssh_port,
         ssh_user=(ssh_user.strip() or dep_row.ssh_user),
         ssh_key=ssh_key,
+        ssh_password=ssh_password,
         env=env,
     )
     dep = deployments.new_deployment("teardown", worker.name)

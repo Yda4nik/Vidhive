@@ -52,10 +52,21 @@
         <div style="flex:1 1 140px"><label>Пользователь</label>
           <input type="text" name="ssh_user" value="root"></div>
       </div>
-      <label>Приватный SSH-ключ (PEM)</label>
-      <textarea name="ssh_key" rows="5" required placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
-        style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
-        background:var(--input-bg); color:var(--txt); font:12px/1.4 monospace; resize:vertical"></textarea>
+      <label>Способ входа</label>
+      <select id="auth-method" onchange="toggleAuth()">
+        <option value="password">Пароль</option>
+        <option value="key">SSH-ключ (PEM)</option>
+      </select>
+      <div id="auth-password">
+        <label>Пароль SSH</label>
+        <input type="password" name="ssh_password" placeholder="пароль root на сервере">
+      </div>
+      <div id="auth-key" hidden>
+        <label>Приватный SSH-ключ (PEM)</label>
+        <textarea name="ssh_key" rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+          style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+          background:var(--input-bg); color:var(--txt); font:12px/1.4 monospace; resize:vertical"></textarea>
+      </div>
       <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:6px">
         <div style="flex:1 1 160px"><label>Имя сервера</label>
           <input type="text" name="worker_name" id="worker_name" placeholder="agent-04" required></div>
@@ -76,6 +87,13 @@
 </div>
 
 <script>
+  function toggleAuth() {
+    var m = document.getElementById("auth-method").value;
+    document.getElementById("auth-password").hidden = (m !== "password");
+    document.getElementById("auth-key").hidden = (m !== "key");
+  }
+  toggleAuth();
+
   // Prefill the agent URL from the SSH host (until the admin edits it).
   (function () {
     var host = document.getElementById("ssh_host");
@@ -120,8 +138,10 @@
         <div style="flex:0 1 80px"><label>Порт</label><input type="number" name="ssh_port" id="td-port"></div>
         <div style="flex:1 1 120px"><label>Пользователь</label><input type="text" name="ssh_user" id="td-user"></div>
       </div>
-      <label>Приватный SSH-ключ (PEM)</label>
-      <textarea name="ssh_key" rows="4" required
+      <label>Пароль SSH</label>
+      <input type="password" name="ssh_password" placeholder="пароль на сервере">
+      <label>…или приватный SSH-ключ (PEM)</label>
+      <textarea name="ssh_key" rows="3"
         style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
         background:var(--input-bg); color:var(--txt); font:12px/1.4 monospace; resize:vertical"></textarea>
       <div style="display:flex; justify-content:space-between; margin-top:12px">
