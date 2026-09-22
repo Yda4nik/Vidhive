@@ -33,7 +33,9 @@ def _extract(url: str) -> list[dict]:
     """
     from yt_dlp import YoutubeDL
 
-    opts = {"quiet": True, "skip_download": True, "extract_flat": "in_playlist"}
+    # socket_timeout keeps a blocked/slow YouTube from hanging the /add request.
+    opts = {"quiet": True, "skip_download": True, "extract_flat": "in_playlist",
+            "socket_timeout": 15, "retries": 1}
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
 

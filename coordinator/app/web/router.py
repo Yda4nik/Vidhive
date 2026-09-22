@@ -926,14 +926,24 @@ def _build_targets(source, mode, values, range_from, range_to):
 
 
 async def _youtube_targets(urls: list[str]) -> list[tuple]:
-    """Expand each YouTube URL (video or playlist) into (ext_id, ext_id, url) targets."""
+    """Expand each YouTube URL (video or playlist) into (ext_id, ext_id, url) targets.
+
+    A single video is parsed locally (no network). Only a playlist URL needs
+    yt-dlp to list its videos, which requires the coordinator to reach YouTube.
+    """
     targets: list[tuple] = []
     seen: set[str] = set()
     for u in urls:
-        try:
-            videos = await asyncio.to_thread(youtube.expand, u)
-        except Exception as exc:  # noqa: BLE001 - surface a readable error to the UI
-            raise ValueError(f"Не удалось разобрать YouTube-ссылку: {str(exc)[:150]}") from exc
+        vid = youtube.video_id_from_url(u)
+        if vid:
+            videos = [{"id": vid, "url": "https://www.youtube.com/watch?v=" + vid, "title": None}]
+        else:
+            try:
+                videos = await asyncio.to_thread(youtube.expand, u)
+            except Exception as exc:  # noqa: BLE001 - surface a readable error to the UI
+                raise ValueError(
+                    f"Не удалось разобрать плейлист YouTube (нет доступа к YouTube?): {str(exc)[:120]}"
+                ) from exc
         for v in videos:
             vid = v.get("id")
             if not vid or vid in seen:
