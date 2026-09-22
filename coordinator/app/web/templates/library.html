@@ -39,6 +39,7 @@
       ★ Избранное
       {% for g in groups %}{% if g.kind == 'favorites' %}<span class="cnt">{{ g.count }}</span>{% endif %}{% endfor %}
     </span>
+    <span class="tab {{ 'active' if group == 'notes' else '' }}" onclick="setParam('group','notes')">🔖 Заметки</span>
     {% set can_edit = request.state.role in ('operator', 'administrator') %}
     {% for g in groups %}{% if g.kind == 'user' %}
       <span class="tab {{ 'active' if group == g.id|string else '' }}" onclick="setParam('group','{{ g.id }}')">
@@ -52,7 +53,7 @@
     {% if can_edit %}<span class="tab" title="Новая группа" onclick="newGroup()">＋</span>{% endif %}
   </div>
 
-  <div class="toolbar">
+  <div class="toolbar" {% if group == 'notes' %}hidden{% endif %}>
     <div class="filter">
       <label>Источник</label>
       <select onchange="setParam('source', this.value)">
@@ -111,6 +112,9 @@
 </div>
 
 <div class="card">
+ {% if group == 'notes' %}
+ <div id="notes-view"><p class="empty">Загрузка заметок…</p></div>
+ {% else %}
  <div id="lib-table">
   {% if items %}
     <table>
@@ -143,9 +147,45 @@
     </p>
   {% endif %}
  </div>
+ {% endif %}
 </div>
 
 <script>
+  function GROUP() { return "{{ group }}"; }
+  function fmtT(s) {
+    s = Math.floor(s || 0);
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+    var mm = (h ? String(m).padStart(2, '0') : m);
+    return (h ? h + ':' : '') + mm + ':' + String(x).padStart(2, '0');
+  }
+  function escNote(s) {
+    return (s || '').replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  function loadAllNotes() {
+    var box = document.getElementById('notes-view');
+    if (!box) return;
+    fetch('/api/notes/all').then(function (r) { return r.json(); }).then(function (list) {
+      if (!list.length) { box.innerHTML = '<p class="empty">Заметок пока нет. Ставь их на плеере кнопкой «＋ заметка».</p>'; return; }
+      var html = '<table><thead><tr><th></th><th>Видео</th><th>Время</th><th>Заметка</th><th></th></tr></thead><tbody>';
+      list.forEach(function (n) {
+        var link = n.item_id ? ('/player/' + n.item_id + '?t=' + Math.floor(n.t_seconds)) : null;
+        html += '<tr>' +
+          '<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:' + n.color + '"></span></td>' +
+          '<td>' + escNote(n.title) + ' <span class="muted tiny">#' + n.external_id + '</span></td>' +
+          '<td class="muted">' + fmtT(n.t_seconds) + '</td>' +
+          '<td>' + escNote(n.label || '(без подписи)') + '</td>' +
+          '<td style="white-space:nowrap">' +
+            (link ? '<a class="btn" href="' + link + '">▶ перейти</a>' : '<span class="muted tiny">видео недоступно</span>') +
+          '</td></tr>';
+      });
+      html += '</tbody></table>';
+      box.innerHTML = html;
+    }).catch(function () { box.innerHTML = '<p class="empty">Не удалось загрузить заметки.</p>'; });
+  }
+  if (GROUP() === 'notes') loadAllNotes();
+
   function setParam(k, v) {
     var u = new URL(location.href);
     if (v) u.searchParams.set(k, v); else u.searchParams.delete(k);

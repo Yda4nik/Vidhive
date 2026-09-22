@@ -14,6 +14,11 @@
   .icon-btn.star { color:var(--accent); }
   .icon-btn.del { color:var(--bad); }
   .spacer { flex:1; }
+  .plyr__progress .vh-marker { position:absolute; top:0; bottom:0; width:3px; transform:translateX(-1px);
+    cursor:pointer; z-index:4; border-radius:2px; }
+  .swatch { width:20px; height:20px; border-radius:50%; cursor:pointer; display:inline-block; }
+  .note-row { display:flex; gap:10px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); }
+  .note-dot { width:12px; height:12px; border-radius:50%; flex:0 0 auto; }
 </style>
 
 <div class="player-wrap">
@@ -30,8 +35,7 @@
     </div>
   </div>
 
-  <video id="player" playsinline controls preload="metadata"
-         style="width:100%; background:#000">
+  <video id="player" playsinline controls preload="metadata" style="width:100%; background:#000">
     <source src="/watch/{{ item_id }}" type="video/mp4">
     Ваш браузер не умеет воспроизводить это видео.
   </video>
@@ -39,6 +43,7 @@
   <div class="player-actions">
     <a class="btn" href="/library">← к библиотеке</a>
     <a class="btn primary" href="/download/{{ item_id }}">⬇ Скачать</a>
+    <button class="btn" onclick="startAddNote()">＋ заметка</button>
     <div class="spacer"></div>
     {% if request.state.role in ('operator', 'administrator') %}
       <button class="icon-btn star" id="fav-btn" title="В избранное"
@@ -48,11 +53,30 @@
   </div>
 </div>
 
+<div class="card player-wrap" style="margin-top:16px">
+  <h3 style="margin:0 0 10px">Заметки на таймлайне</h3>
+  <div id="na-add" hidden style="margin-bottom:12px; padding:12px; border:1px solid var(--line); border-radius:10px">
+    <div class="row" style="gap:10px; align-items:center; flex-wrap:wrap">
+      <span class="muted tiny">Время: <b id="na-time">0:00</b></span>
+      <input type="text" id="na-label" placeholder="подпись заметки" style="flex:1 1 200px"
+             onkeydown="if(event.key==='Enter') saveNote(); if(event.key==='Escape') cancelAddNote();">
+      <span id="na-colors" class="row" style="gap:6px"></span>
+      <button class="btn primary" onclick="saveNote()">Сохранить</button>
+      <span class="btn" onclick="cancelAddNote()">Отмена</span>
+    </div>
+  </div>
+  <div id="note-list"><p class="empty">Заметок пока нет. Поставь первую кнопкой «＋ заметка».</p></div>
+</div>
+
 <script src="/static/plyr/plyr.min.js"></script>
 <script>
   var ITEM = {{ item_id }};
+  var EXT = {{ external_id }};
   var POSKEY = "vidhive-pos-{{ external_id }}";
   var START = {{ start_t }};
+  var COLORS = ['#e05a5a', '#e0913f', '#d9c23f', '#3fb27f', '#7c9cff', '#b57cff'];
+  var pickColor = COLORS[4];
+  var notes = [];
 
   var player = new Plyr('#player', {
     iconUrl: '/static/plyr/plyr.svg',
@@ -65,23 +89,38 @@
     seekTime: 10,
   });
 
-  // Resume where we left off (or jump to ?t= for note deep-links).
+  function fmt(s) {
+    s = Math.floor(s || 0);
+    var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+    var mm = (h ? String(m).padStart(2, '0') : m);
+    return (h ? h + ':' : '') + mm + ':' + String(x).padStart(2, '0');
+  }
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  // ---- resume position / deep-link ----
   player.on('loadedmetadata', function () {
     var t = START;
     if (!t) { try { t = parseFloat(localStorage.getItem(POSKEY)) || 0; } catch (e) {} }
     if (t > 5 && player.duration && t < player.duration - 3) player.currentTime = t;
+    renderMarkers();
   });
   var lastSave = 0;
   player.on('timeupdate', function () {
     var now = Date.now();
-    if (now - lastSave > 3000) {  // throttle writes
+    if (now - lastSave > 3000) {
       lastSave = now;
       try { localStorage.setItem(POSKEY, String(Math.floor(player.currentTime))); } catch (e) {}
     }
   });
   player.on('ended', function () { try { localStorage.removeItem(POSKEY); } catch (e) {} });
+  player.on('ready', function () { setTimeout(loadNotes, 120); });
+  window.addEventListener('resize', renderMarkers);
 
-  // ---- actions ----
+  // ---- video actions ----
   function post(url, body) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body) });
@@ -98,6 +137,107 @@
     post('/api/library/delete', { item_ids: [ITEM] }).then(function (r) {
       if (r.ok) location.href = '/library'; else alert('Ошибка: ' + r.status);
     });
+  }
+
+  // ---- notes ----
+  function seekTo(t) { player.currentTime = t; player.play(); }
+
+  function buildPalette() {
+    var box = document.getElementById('na-colors');
+    box.innerHTML = '';
+    COLORS.forEach(function (c) {
+      var b = document.createElement('span');
+      b.className = 'swatch';
+      b.style.background = c;
+      b.style.outline = (c === pickColor) ? '2px solid var(--txt)' : '2px solid transparent';
+      b.onclick = function () { pickColor = c; buildPalette(); };
+      box.appendChild(b);
+    });
+  }
+
+  function loadNotes() {
+    fetch('/api/notes?external_id=' + EXT)
+      .then(function (r) { return r.json(); })
+      .then(function (d) { notes = d || []; renderNotes(); renderMarkers(); });
+  }
+
+  function renderNotes() {
+    var box = document.getElementById('note-list');
+    if (!notes.length) {
+      box.innerHTML = '<p class="empty">Заметок пока нет. Поставь первую кнопкой «＋ заметка».</p>';
+      return;
+    }
+    box.innerHTML = '';
+    notes.forEach(function (n) {
+      var row = document.createElement('div');
+      row.className = 'note-row';
+      row.innerHTML =
+        '<span class="note-dot" style="background:' + n.color + '"></span>' +
+        '<span class="btn" style="padding:2px 8px" onclick="seekTo(' + n.t_seconds + ')">' + fmt(n.t_seconds) + '</span>' +
+        '<span style="flex:1">' + escapeHtml(n.label || '(без подписи)') + '</span>' +
+        '<span class="btn" title="Изменить" onclick="editNote(' + n.id + ')">✎</span>' +
+        '<span class="btn" style="color:var(--bad)" title="Удалить" onclick="delNote(' + n.id + ')">🗑</span>';
+      box.appendChild(row);
+    });
+  }
+
+  function renderMarkers() {
+    var prog = player.elements && player.elements.progress;
+    if (!prog || !player.duration) return;
+    prog.querySelectorAll('.vh-marker').forEach(function (m) { m.remove(); });
+    notes.forEach(function (n) {
+      var pct = Math.max(0, Math.min(100, n.t_seconds / player.duration * 100));
+      var m = document.createElement('span');
+      m.className = 'vh-marker';
+      m.title = (n.label || 'заметка') + ' · ' + fmt(n.t_seconds);
+      m.style.left = pct + '%';
+      m.style.background = n.color;
+      m.onclick = function (e) { e.stopPropagation(); seekTo(n.t_seconds); };
+      prog.appendChild(m);
+    });
+  }
+
+  function startAddNote() {
+    var box = document.getElementById('na-add');
+    box.dataset.t = player.currentTime;
+    box.dataset.edit = '';
+    document.getElementById('na-time').textContent = fmt(player.currentTime);
+    document.getElementById('na-label').value = '';
+    pickColor = COLORS[4];
+    buildPalette();
+    box.hidden = false;
+    document.getElementById('na-label').focus();
+  }
+  function cancelAddNote() { document.getElementById('na-add').hidden = true; }
+
+  function saveNote() {
+    var box = document.getElementById('na-add');
+    var label = document.getElementById('na-label').value.trim();
+    var t = parseFloat(box.dataset.t) || 0;
+    var editId = box.dataset.edit;
+    var req = editId
+      ? fetch('/api/notes/' + editId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: label, color: pickColor }) })
+      : post('/api/notes', { external_id: EXT, t_seconds: t, label: label, color: pickColor });
+    req.then(function (r) { if (r.ok) { box.hidden = true; loadNotes(); } else alert('Ошибка: ' + r.status); });
+  }
+
+  function editNote(id) {
+    var n = notes.find(function (x) { return x.id === id; });
+    if (!n) return;
+    var box = document.getElementById('na-add');
+    box.dataset.t = n.t_seconds;
+    box.dataset.edit = id;
+    document.getElementById('na-time').textContent = fmt(n.t_seconds);
+    document.getElementById('na-label').value = n.label || '';
+    pickColor = n.color;
+    buildPalette();
+    box.hidden = false;
+    document.getElementById('na-label').focus();
+  }
+  function delNote(id) {
+    if (!confirm('Удалить заметку?')) return;
+    fetch('/api/notes/' + id, { method: 'DELETE' }).then(function (r) { if (r.ok) loadNotes(); });
   }
 </script>
 {% endblock %}
