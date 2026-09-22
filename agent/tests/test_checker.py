@@ -47,6 +47,15 @@ def test_found_with_metadata():
     assert r.size_bytes == 123
 
 
+def test_url_numeric_template_vs_direct_url():
+    c = _checker(200)
+    # A numeric template substitutes the id...
+    assert c._url(42, "https://kinescope.io/{id}") == "https://kinescope.io/42"
+    # ...while a direct URL (no {id}, e.g. YouTube) is used verbatim.
+    yt = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    assert c._url(999, yt) == yt
+
+
 def test_page_exists_but_no_media_is_not_found():
     assert _run(_checker(200, probe=lambda url: None).check(1)).status == ItemStatus.NOT_FOUND
 

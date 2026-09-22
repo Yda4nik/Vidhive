@@ -96,6 +96,7 @@ async def initialize_job_chunks(session: AsyncSession, job: Job) -> None:
         return
 
     numeric = [t for t in targets if t.url is None and t.range_start is not None]
+    url_targets = [t for t in targets if t.url is not None and t.range_start is not None]
     open_ended = [t for t in numeric if t.range_end is None]
     if open_ended:
         t = open_ended[0]
@@ -121,6 +122,15 @@ async def initialize_job_chunks(session: AsyncSession, job: Job) -> None:
                 )
             )
             start = end + 1
+    # Link-based (YouTube) targets: one single-id chunk per video, carrying the
+    # exact URL. Spreads across workers like any other chunk.
+    for t in url_targets:
+        session.add(
+            RangeChunk(
+                job_id=job.id, range_start=t.range_start, range_end=t.range_end,
+                next_id=t.range_start, url=t.url, status=ChunkStatus.PENDING.value,
+            )
+        )
     await session.flush()
 
 

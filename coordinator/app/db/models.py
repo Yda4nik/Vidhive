@@ -230,6 +230,9 @@ class RangeChunk(Base):
     range_start: Mapped[int] = mapped_column(BigInteger, nullable=False)
     range_end: Mapped[int] = mapped_column(BigInteger, nullable=False)
     next_id: Mapped[int | None] = mapped_column(BigInteger)  # checkpoint within the chunk
+    # Direct download URL for link-based work (YouTube): when set, the agent
+    # downloads this exact URL instead of building one from a numeric template.
+    url: Mapped[str | None] = mapped_column(String(1000))
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     leased_by: Mapped[int | None] = mapped_column(ForeignKey("workers.id", ondelete="SET NULL"))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

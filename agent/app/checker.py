@@ -81,7 +81,10 @@ class Checker:
         self.limiter = limiter
 
     def _url(self, external_id: int, template: str | None = None) -> str:
-        return (template or self.settings.target_template).format(id=external_id)
+        # A link-based template (a full URL, e.g. YouTube) has no {id} placeholder
+        # and is used verbatim; numeric sources substitute the id.
+        tpl = template or self.settings.target_template
+        return tpl.format(id=external_id) if "{id}" in tpl else tpl
 
     def _backoff(self, attempt: int) -> float:
         base, cap = self.settings.retry_base_delay, self.settings.retry_max_delay

@@ -247,7 +247,9 @@ async def lease(
         range_end=chunk.range_end,
         next_id=chunk.next_id,
         lease_expires_at=chunk.lease_expires_at,
-        target_template=template_for(job.source) if job else None,
+        # A link-based chunk (YouTube) carries the exact URL; otherwise build
+        # the URL from the source's numeric template.
+        target_template=chunk.url or (template_for(job.source) if job else None),
     )
 
 

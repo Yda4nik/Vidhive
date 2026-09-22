@@ -35,7 +35,7 @@ from app.api.jobs import (
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
 from app.db.models import AgentDeployment, Invite, RoleModel, User, UserRole
-from app.services import deployer, deployments
+from app.services import deployer, deployments, youtube
 from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
 from app.services.security import hash_password, verify_password
 from app.core.config import get_settings
@@ -925,6 +925,27 @@ def _build_targets(source, mode, values, range_from, range_to):
     return resolved, targets
 
 
+async def _youtube_targets(urls: list[str]) -> list[tuple]:
+    """Expand each YouTube URL (video or playlist) into (ext_id, ext_id, url) targets."""
+    targets: list[tuple] = []
+    seen: set[str] = set()
+    for u in urls:
+        try:
+            videos = await asyncio.to_thread(youtube.expand, u)
+        except Exception as exc:  # noqa: BLE001 - surface a readable error to the UI
+            raise ValueError(f"Не удалось разобрать YouTube-ссылку: {str(exc)[:150]}") from exc
+        for v in videos:
+            vid = v.get("id")
+            if not vid or vid in seen:
+                continue
+            seen.add(vid)
+            ext = youtube.yt_external_id(vid)
+            targets.append((ext, ext, v.get("url") or ("https://www.youtube.com/watch?v=" + vid)))
+    if not targets:
+        raise ValueError("В ссылке не найдено видео")
+    return targets
+
+
 @router.post("/add", dependencies=[Depends(require_role("operator"))])
 async def add_submit(
     source: str = Form("auto"),
@@ -936,8 +957,18 @@ async def add_submit(
     group_id: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
+    vals = [v.strip() for v in value if v.strip()]
+    is_youtube = source == "youtube" or (
+        mode == "link" and any(source_from_url(v) == "youtube" for v in vals)
+    )
     try:
-        resolved_source, targets = _build_targets(source, mode, value, range_from, range_to)
+        if is_youtube:
+            if mode != "link":
+                raise ValueError("YouTube скачивается только по ссылке")
+            targets = await _youtube_targets(vals)
+            resolved_source = "youtube"
+        else:
+            resolved_source, targets = _build_targets(source, mode, value, range_from, range_to)
     except ValueError as exc:
         return RedirectResponse(url=f"/jobs?error={quote(str(exc))}", status_code=303)
 
