@@ -101,6 +101,26 @@ class Invite(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class Note(Base):
+    """A personal, timestamped marker on a video's timeline.
+
+    Attached to the video identity (``external_id``), not a specific item row,
+    so notes survive a re-download. Private to the user who created them.
+    """
+
+    __tablename__ = "notes"
+    __table_args__ = (Index("ix_notes_user_external", "user_id", "external_id"),)
+
+    id: Mapped[int] = _pk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    external_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    t_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    label: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="#7c9cff")
+    created_at: Mapped[datetime] = _created()
+    updated_at: Mapped[datetime] = _updated()
+
+
 # --------------------------------------------------------------------------- #
 # Workers
 # --------------------------------------------------------------------------- #

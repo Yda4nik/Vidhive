@@ -18,7 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 
-from app.api import health, jobs, library, workers
+from app.api import health, jobs, library, notes, workers
 from app.core.config import get_settings
 from app.db.models import Job
 from app.db.session import get_sessionmaker
@@ -134,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(workers.router)
     app.include_router(library.router)
+    app.include_router(notes.router)
 
     # Web UI
     static_dir = Path(__file__).resolve().parent / "web" / "static"
