@@ -1099,9 +1099,31 @@ async def library(
     )
 
 
+async def _library_order(session: AsyncSession) -> list[int]:
+    """Item ids in the library's default order (newest completed per external_id)."""
+    latest = (
+        select(func.max(Item.id).label("item_id"))
+        .where(Item.status == ItemStatus.COMPLETED.value)
+        .group_by(Item.external_id)
+        .subquery()
+    )
+    return list(
+        (
+            await session.execute(
+                select(Item.id)
+                .join(latest, latest.c.item_id == Item.id)
+                .order_by(Item.updated_at.desc(), Item.id.desc())
+            )
+        ).scalars().all()
+    )
+
+
 @router.get("/player/{item_id}", response_class=HTMLResponse,
             dependencies=[Depends(require_role("viewer"))])
-async def player(item_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+async def player(
+    item_id: int, request: Request, t: float = 0,
+    session: AsyncSession = Depends(get_session),
+):
     """A real player page; the <video> element streams from /watch/{id}."""
     item = await session.get(Item, item_id)
     if item is None:
@@ -1110,6 +1132,28 @@ async def player(item_id: int, request: Request, session: AsyncSession = Depends
         await session.execute(select(MediaMetadata).where(MediaMetadata.item_id == item.id))
     ).scalars().first()
     worker = await session.get(Worker, item.worker_id) if item.worker_id else None
+
+    # Neighbours in the library order (for prev/next).
+    order = await _library_order(session)
+    prev_id = next_id = None
+    if item.id in order:
+        i = order.index(item.id)
+        if i > 0:
+            prev_id = order[i - 1]
+        if i < len(order) - 1:
+            next_id = order[i + 1]
+
+    # Favourite status.
+    fav = await get_or_create_favorites(session)
+    await session.commit()
+    is_fav = (
+        await session.execute(
+            select(ItemGroup.item_id)
+            .where(ItemGroup.group_id == fav.id)
+            .where(ItemGroup.item_id == item.id)
+        )
+    ).first() is not None
+
     return _page(
         request,
         "watch.html",
@@ -1118,9 +1162,53 @@ async def player(item_id: int, request: Request, session: AsyncSession = Depends
             "external_id": item.external_id,
             "title": (meta.title if meta else None) or f"ID {item.external_id}",
             "size_bytes": meta.size_bytes if meta else None,
+            "duration": meta.duration_seconds if meta else None,
             "worker": worker.name if worker else None,
+            "prev_id": prev_id,
+            "next_id": next_id,
+            "is_fav": is_fav,
+            "start_t": t if t and t > 0 else 0,
         },
     )
+
+
+@router.get("/download/{item_id}", dependencies=[Depends(require_role("viewer"))])
+async def download(item_id: int, request: Request, session: AsyncSession = Depends(get_session)):
+    """Proxy the file from its agent as an attachment (a real download)."""
+    item = await session.get(Item, item_id)
+    if item is None or item.worker_id is None:
+        raise HTTPException(status_code=404, detail="item not available")
+    worker = await session.get(Worker, item.worker_id)
+    if worker is None or not worker.agent_url:
+        raise HTTPException(status_code=404, detail="owning agent unknown")
+    meta = (
+        await session.execute(select(MediaMetadata).where(MediaMetadata.item_id == item.id))
+    ).scalars().first()
+
+    base = (meta.title if meta and meta.title else f"video_{item.external_id}")
+    safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", base)[:120].strip() or f"video_{item.external_id}"
+
+    url = f"{worker.agent_url.rstrip('/')}/files/{item.external_id}"
+    client = httpx.AsyncClient(timeout=None)
+    try:
+        resp = await client.send(client.build_request("GET", url), stream=True)
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"agent unreachable: {exc}") from exc
+
+    async def body():
+        try:
+            async for chunk in resp.aiter_bytes():
+                yield chunk
+        finally:
+            await resp.aclose()
+            await client.aclose()
+
+    headers = {"Content-Disposition": f'attachment; filename="{safe}.mp4"'}
+    if "content-length" in resp.headers:
+        headers["content-length"] = resp.headers["content-length"]
+    return StreamingResponse(body(), status_code=resp.status_code,
+                             media_type="video/mp4", headers=headers)
 
 
 _STREAM_HEADERS = ("content-type", "content-length", "accept-ranges", "content-range")

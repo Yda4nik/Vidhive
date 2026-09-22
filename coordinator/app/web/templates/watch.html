@@ -1,24 +1,103 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Vidhive{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="/static/plyr/plyr.min.css">
+<style>
+  .player-wrap { max-width:1100px; margin:0 auto; }
+  .player-wrap .plyr { border-radius:12px; overflow:hidden; --plyr-color-main:var(--accent); }
+  .player-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
+  .player-head h2 { margin:0 0 4px; font-size:20px; }
+  .player-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:14px; }
+  .icon-btn { background:none; border:1px solid var(--line); border-radius:8px; cursor:pointer;
+    color:var(--txt); font-size:18px; padding:5px 10px; line-height:1; }
+  .icon-btn:hover { border-color:var(--accent); }
+  .icon-btn.star { color:var(--accent); }
+  .icon-btn.del { color:var(--bad); }
+  .spacer { flex:1; }
+</style>
 
-<div class="card">
-  <h2>{{ title }}</h2>
-  <p class="muted">
-    ID {{ external_id }} · {{ size_bytes|hsize }}{% if size_bytes %} ({{ size_bytes|bexact }}){% endif %}{% if worker %} · хранится на {{ worker }}{% endif %}
-  </p>
-  <video controls preload="metadata" style="width:100%; max-height:70vh; background:#000; border-radius:10px">
+<div class="player-wrap">
+  <div class="player-head">
+    <div>
+      <h2>{{ title }}</h2>
+      <p class="muted tiny" style="margin:0">
+        ID {{ external_id }} · {{ size_bytes|hsize }}{% if size_bytes %} ({{ size_bytes|bexact }}){% endif %}{% if worker %} · {{ worker }}{% endif %}
+      </p>
+    </div>
+    <div style="display:flex; gap:8px">
+      {% if prev_id %}<a class="btn" href="/player/{{ prev_id }}" title="Предыдущее (новее)">← пред</a>{% endif %}
+      {% if next_id %}<a class="btn" href="/player/{{ next_id }}" title="Следующее (старее)">след →</a>{% endif %}
+    </div>
+  </div>
+
+  <video id="player" playsinline controls preload="metadata"
+         style="width:100%; background:#000">
     <source src="/watch/{{ item_id }}" type="video/mp4">
     Ваш браузер не умеет воспроизводить это видео.
   </video>
-  <p class="muted" style="margin-top:12px">
-    Файл физически лежит на агенте{% if worker %} <b>{{ worker }}</b>{% endif %}; координатор отдаёт его
-    потоком с поддержкой перемотки.
-  </p>
-  <div style="margin-top:12px">
+
+  <div class="player-actions">
     <a class="btn" href="/library">← к библиотеке</a>
-    <a class="btn" href="/watch/{{ item_id }}" target="_blank" rel="noopener">открыть файл напрямую</a>
+    <a class="btn primary" href="/download/{{ item_id }}">⬇ Скачать</a>
+    <div class="spacer"></div>
+    {% if request.state.role in ('operator', 'administrator') %}
+      <button class="icon-btn star" id="fav-btn" title="В избранное"
+              onclick="toggleFav()">{{ '★' if is_fav else '☆' }}</button>
+      <button class="icon-btn del" title="Удалить видео" onclick="delVideo()">🗑</button>
+    {% endif %}
   </div>
 </div>
 
+<script src="/static/plyr/plyr.min.js"></script>
+<script>
+  var ITEM = {{ item_id }};
+  var POSKEY = "vidhive-pos-{{ external_id }}";
+  var START = {{ start_t }};
+
+  var player = new Plyr('#player', {
+    iconUrl: '/static/plyr/plyr.svg',
+    blankVideo: '',
+    keyboard: { focused: true, global: true },
+    speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
+    controls: ['play-large','rewind','play','fast-forward','progress','current-time',
+               'duration','mute','volume','settings','pip','airplay','fullscreen'],
+    settings: ['speed'],
+    seekTime: 10,
+  });
+
+  // Resume where we left off (or jump to ?t= for note deep-links).
+  player.on('loadedmetadata', function () {
+    var t = START;
+    if (!t) { try { t = parseFloat(localStorage.getItem(POSKEY)) || 0; } catch (e) {} }
+    if (t > 5 && player.duration && t < player.duration - 3) player.currentTime = t;
+  });
+  var lastSave = 0;
+  player.on('timeupdate', function () {
+    var now = Date.now();
+    if (now - lastSave > 3000) {  // throttle writes
+      lastSave = now;
+      try { localStorage.setItem(POSKEY, String(Math.floor(player.currentTime))); } catch (e) {}
+    }
+  });
+  player.on('ended', function () { try { localStorage.removeItem(POSKEY); } catch (e) {} });
+
+  // ---- actions ----
+  function post(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) });
+  }
+  function toggleFav() {
+    var btn = document.getElementById('fav-btn');
+    var on = btn.textContent === '☆';
+    post('/api/library/favorite', { item_ids: [ITEM], on: on }).then(function (r) {
+      if (r.ok) btn.textContent = on ? '★' : '☆'; else alert('Ошибка: ' + r.status);
+    });
+  }
+  function delVideo() {
+    if (!confirm('Удалить это видео вместе с файлом?')) return;
+    post('/api/library/delete', { item_ids: [ITEM] }).then(function (r) {
+      if (r.ok) location.href = '/library'; else alert('Ошибка: ' + r.status);
+    });
+  }
+</script>
 {% endblock %}
