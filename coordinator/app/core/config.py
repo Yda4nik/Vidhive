@@ -1,5 +1,6 @@
 """Coordinator configuration, loaded from environment variables."""
 
+import secrets
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,10 +28,25 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Access control (all from env; empty admin/token = feature effectively off).
-    secret_key: str = "dev-insecure-change-me"
+    secret_key: str = ""  # signs session cookies; see resolve_secret_key()
     agent_token: str = ""
     admin_user: str = ""
     admin_password: str = ""
+
+
+# Values that are publicly known (the old built-in default, and the placeholder shipped
+# in deploy/.env.example) — a deployment that kept one would have forgeable cookies.
+_KNOWN_KEYS = {"", "dev-insecure-change-me", "change-me-to-a-long-random-string"}
+
+
+def resolve_secret_key(value: str | None) -> tuple[str, bool]:
+    """Return ``(key, ephemeral)``. A missing, known-placeholder or too-short key is
+    replaced by a random one for this process (sessions then reset on restart) rather
+    than silently running with a guessable signing key."""
+    v = (value or "").strip()
+    if v in _KNOWN_KEYS or len(v) < 16:
+        return secrets.token_urlsafe(48), True
+    return v, False
 
 
 @lru_cache

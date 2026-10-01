@@ -38,7 +38,8 @@ from app.db.models import AgentDeployment, Invite, RoleModel, User, UserRole
 from app.services import deployer, deployments, drain, youtube
 from app.services.agent_client import agent_headers, file_url
 from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
-from app.services.security import hash_password, verify_password
+from app.services.ratelimit import login_limiter
+from app.services.security import DUMMY_HASH, ahash_password, averify_password
 from app.core.config import get_settings
 
 INVITE_TTL = timedelta(minutes=15)
@@ -124,8 +125,12 @@ _JOB_ACTIONS = {
 }
 
 
-def _page(request: Request, name: str, ctx: dict) -> HTMLResponse:
-    return templates.TemplateResponse(request, name, ctx)
+def _page(request: Request, name: str, ctx: dict, status_code: int = 200) -> HTMLResponse:
+    return templates.TemplateResponse(request, name, ctx, status_code=status_code)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 _SPEED_WINDOW_SECONDS = 60
@@ -517,7 +522,7 @@ async def setup_submit(
     if password != confirm:
         return _page(request, "setup.html", {"error": "Пароли не совпадают"})
     await seed_roles(session)
-    user = User(username=username.strip(), password_hash=hash_password(password))
+    user = User(username=username.strip(), password_hash=await ahash_password(password))
     session.add(user)
     await session.flush()
     rid = (
@@ -565,8 +570,24 @@ async def login_submit(
         await session.execute(select(User).where(User.username == username))
     ).scalar_one_or_none()
     next = _safe_next(next)
-    if user is None or not verify_password(password, user.password_hash):
+    ip = _client_ip(request)
+
+    # Throttle first, so a blocked attempt costs nothing (no hashing).
+    wait = login_limiter.blocked_for(ip, username)
+    if wait:
+        return _page(
+            request, "login.html",
+            {"next": next, "error": f"Слишком много неудачных попыток. Повторите через {wait} с."},
+            status_code=429,
+        )
+
+    # Always verify against *a* hash — a dummy one for an unknown user — so the
+    # response time doesn't reveal whether the login exists. Runs off the event loop.
+    ok = await averify_password(password, user.password_hash if user else DUMMY_HASH)
+    if user is None or not ok:
+        login_limiter.record_failure(ip, username)
         return _page(request, "login.html", {"next": next, "error": "Неверный логин или пароль"})
+    login_limiter.record_success(ip, username)
     request.session["user_id"] = user.id
     return RedirectResponse(url=next, status_code=303)
 
@@ -660,7 +681,7 @@ async def users_create(
     ).scalar_one_or_none()
     if exists is not None:
         return RedirectResponse("/users?error=логин+занят", status_code=303)
-    user = User(username=username, password_hash=hash_password(password))
+    user = User(username=username, password_hash=await ahash_password(password))
     session.add(user)
     await session.flush()
     await _set_role(session, user.id, role)
@@ -699,7 +720,7 @@ async def users_set_password(
 ):
     user = await session.get(User, user_id)
     if user is not None:
-        user.password_hash = hash_password(password)
+        user.password_hash = await ahash_password(password)
         await session.commit()
     return RedirectResponse("/users", status_code=303)
 
@@ -776,7 +797,7 @@ async def register_submit(
                      {"invalid": False, "token": token, "error": "Такой логин уже занят"})
 
     await seed_roles(session)
-    user = User(username=username.strip(), password_hash=hash_password(password))
+    user = User(username=username.strip(), password_hash=await ahash_password(password))
     session.add(user)
     await session.flush()
     rid = (await session.execute(select(RoleModel.id).where(RoleModel.name == "viewer"))).scalar_one()

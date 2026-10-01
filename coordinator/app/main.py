@@ -19,7 +19,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 
 from app.api import health, jobs, library, notes, workers
-from app.core.config import get_settings
+from app.core.config import get_settings, resolve_secret_key
 from app.db.models import Job
 from app.db.session import get_sessionmaker
 from app.services import drain, scheduler
@@ -150,7 +150,13 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     app.add_middleware(BaseHTTPMiddleware, dispatch=_attach_user)
-    app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, same_site="lax")
+    secret_key, ephemeral = resolve_secret_key(settings.secret_key)
+    if ephemeral:
+        log.warning(
+            "VIDHIVE_SECRET_KEY is unset or a known placeholder: using a random key for this "
+            "process, so everyone is signed out on every restart. Set a long random value."
+        )
+    app.add_middleware(SessionMiddleware, secret_key=secret_key, same_site="lax")
 
     @app.exception_handler(AccessError)
     async def _access_error(request: Request, exc: AccessError):

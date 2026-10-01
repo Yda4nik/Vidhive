@@ -60,6 +60,11 @@ def _start_app():
     sess.get_engine.cache_clear()
     sess.get_sessionmaker.cache_clear()
 
+    # The login throttle is process-wide state: start every test with a clean slate.
+    from app.services.ratelimit import login_limiter
+
+    login_limiter.reset()
+
     from fastapi.testclient import TestClient
 
     from app.main import app

@@ -26,7 +26,7 @@ services:
     environment:
       VIDHIVE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vidhive}:${POSTGRES_PASSWORD:-vidhive}@postgres:5432/${POSTGRES_DB:-vidhive}
       # Access control (see deploy/.env.example). Empty admin/token = feature off.
-      VIDHIVE_SECRET_KEY: ${VIDHIVE_SECRET_KEY:-dev-insecure-change-me}
+      VIDHIVE_SECRET_KEY: ${VIDHIVE_SECRET_KEY:-}
       VIDHIVE_ADMIN_USER: ${VIDHIVE_ADMIN_USER:-}
       VIDHIVE_ADMIN_PASSWORD: ${VIDHIVE_ADMIN_PASSWORD:-}
       VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
