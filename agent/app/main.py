@@ -6,11 +6,12 @@ coordinator/web can stream them.
 """
 
 import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from app.checker import Checker, target_dir
@@ -44,6 +45,17 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Vidhive Agent", version="0.3.0", lifespan=lifespan)
 
+    def require_token(request: Request) -> None:
+        """File endpoints are reachable from the network (on a public IP for an
+        SSH-deployed agent), so when a token is configured the caller — the
+        coordinator — must present it. Without a configured token nothing changes."""
+        token = settings.agent_token
+        if not token:
+            return
+        given = request.headers.get("X-Agent-Token", "")
+        if not hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8")):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
     @app.get("/health")
     async def health() -> dict:
         runner: WorkerRunner | None = getattr(app.state, "runner", None)
@@ -55,7 +67,7 @@ def create_app() -> FastAPI:
             "coordinator_url": settings.coordinator_url,
         }
 
-    @app.get("/files/{external_id}")
+    @app.get("/files/{external_id}", dependencies=[Depends(require_token)])
     async def get_file(external_id: int):
         """Serve the downloaded video for streaming by the coordinator/web."""
         directory = target_dir(settings.storage_path, external_id)
@@ -64,7 +76,7 @@ def create_app() -> FastAPI:
                 return FileResponse(candidate)
         raise HTTPException(status_code=404, detail="file not found on this agent")
 
-    @app.delete("/files/{external_id}")
+    @app.delete("/files/{external_id}", dependencies=[Depends(require_token)])
     async def delete_file(external_id: int) -> dict:
         """Delete the stored video directory for this identifier (frees disk)."""
         import shutil

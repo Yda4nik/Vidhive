@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Group, Item, ItemGroup, Worker
 from app.db.session import get_session
+from app.services.agent_client import agent_headers, file_url
 from app.services.auth import require_role
 from app.services.events import log_event
 from vidhive_common.enums import ItemStatus
@@ -170,9 +171,9 @@ async def delete_videos(payload: LibraryAction, session: AsyncSession = Depends(
         for item in items:
             worker = await session.get(Worker, item.worker_id) if item.worker_id else None
             if worker and worker.agent_url:
-                url = f"{worker.agent_url.rstrip('/')}/files/{item.external_id}"
+                url = file_url(worker.agent_url, item.external_id)
                 try:
-                    await client.delete(url)
+                    await client.delete(url, headers=agent_headers())
                 except httpx.HTTPError as exc:
                     log.warning("agent file delete failed for %s: %s", item.external_id, exc)
             log_event(

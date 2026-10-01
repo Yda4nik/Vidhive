@@ -15,6 +15,7 @@ from app.core.sources import template_for
 from app.db.models import Item, Job, JobTarget, RangeChunk, Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
+from app.services.agent_client import agent_headers, file_url, validate_agent_url
 from app.services.auth import require_agent_token, require_role
 from app.services.bus import bus
 from app.services.events import log_event
@@ -48,6 +49,11 @@ async def register_worker(
     payload: WorkerRegister, session: AsyncSession = Depends(get_session)
 ) -> Worker:
     """Register a worker, or refresh it if the name already exists (idempotent)."""
+    # The coordinator will later call this address (stream/delete files): refuse
+    # anything that could point it at internal services (SSRF).
+    bad = validate_agent_url(payload.agent_url)
+    if bad:
+        raise HTTPException(status_code=422, detail=bad)
     result = await session.execute(select(Worker).where(Worker.name == payload.name))
     worker = result.scalar_one_or_none()
     if worker is None:
@@ -157,11 +163,12 @@ async def delete_worker(
 
     # Delete the physical files on the agent (best-effort — it may already be offline).
     if worker.agent_url:
-        base = worker.agent_url.rstrip("/")
         async with httpx.AsyncClient(timeout=15.0) as client:
             for it in completed:
                 try:
-                    await client.delete(f"{base}/files/{it.external_id}")
+                    await client.delete(
+                        file_url(worker.agent_url, it.external_id), headers=agent_headers()
+                    )
                 except httpx.HTTPError as exc:
                     log.warning("agent file delete failed for %s: %s", it.external_id, exc)
 

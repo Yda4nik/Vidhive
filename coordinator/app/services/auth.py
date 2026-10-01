@@ -3,6 +3,7 @@ session-backed current user, and the role/agent-token guards used by routes."""
 
 from __future__ import annotations
 
+import hmac
 import logging
 
 from sqlalchemy import func, select
@@ -104,5 +105,7 @@ async def require_agent_token(request: Request) -> None:
     token = get_settings().agent_token
     if not token:
         return  # feature disabled until a token is configured
-    if request.headers.get("X-Agent-Token") != token:
+    given = request.headers.get("X-Agent-Token", "")
+    # Constant-time comparison so the token can't be guessed byte by byte via timing.
+    if not hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8")):
         raise AccessError(401, authenticated=False)

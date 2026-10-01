@@ -36,6 +36,7 @@ from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
 from app.db.models import AgentDeployment, Invite, RoleModel, User, UserRole
 from app.services import deployer, deployments, youtube
+from app.services.agent_client import agent_headers, file_url
 from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
 from app.services.security import hash_password, verify_password
 from app.core.config import get_settings
@@ -1276,10 +1277,10 @@ async def download(item_id: int, request: Request, session: AsyncSession = Depen
     base = (meta.title if meta and meta.title else f"video_{item.external_id}")
     safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", base)[:120].strip() or f"video_{item.external_id}"
 
-    url = f"{worker.agent_url.rstrip('/')}/files/{item.external_id}"
-    client = httpx.AsyncClient(timeout=None)
+    url = file_url(worker.agent_url, item.external_id)
+    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
     try:
-        resp = await client.send(client.build_request("GET", url), stream=True)
+        resp = await client.send(client.build_request("GET", url, headers=agent_headers()), stream=True)
     except httpx.HTTPError as exc:
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"agent unreachable: {exc}") from exc
@@ -1312,10 +1313,13 @@ async def watch(item_id: int, request: Request, session: AsyncSession = Depends(
     if worker is None or not worker.agent_url:
         raise HTTPException(status_code=404, detail="owning agent unknown")
 
-    url = f"{worker.agent_url.rstrip('/')}/files/{item.external_id}"
-    fwd = {"Range": request.headers["range"]} if "range" in request.headers else {}
+    url = file_url(worker.agent_url, item.external_id)
+    fwd = agent_headers()
+    if "range" in request.headers:
+        fwd["Range"] = request.headers["range"]
 
-    client = httpx.AsyncClient(timeout=None)
+    # No read timeout (a video streams for as long as it plays) but do bound connect.
+    client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10.0))
     try:
         resp = await client.send(client.build_request("GET", url, headers=fwd), stream=True)
     except httpx.HTTPError as exc:

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Event, Item, Job, MediaMetadata, Worker
 from app.db.session import get_session
 from app.services import scheduler
+from app.services.agent_client import agent_headers, file_url
 from app.services.auth import require_role
 from app.services.events import log_event
 from vidhive_common.enums import ItemStatus, JobState
@@ -179,7 +180,9 @@ async def delete_job(job_id: int, session: AsyncSession = Depends(get_session)) 
         for item, worker in rows:
             if worker and worker.agent_url:
                 try:
-                    await client.delete(f"{worker.agent_url.rstrip('/')}/files/{item.external_id}")
+                    await client.delete(
+                        file_url(worker.agent_url, item.external_id), headers=agent_headers()
+                    )
                 except httpx.HTTPError as exc:
                     log.warning("agent file delete failed for %s: %s", item.external_id, exc)
     log_event(
