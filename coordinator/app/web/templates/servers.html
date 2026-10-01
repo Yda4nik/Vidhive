@@ -156,12 +156,15 @@
   var CAN_REDISTRIBUTE = {{ 'true' if can_redistribute else 'false' }};
   var delId = null;
 
-  function openTeardown(id, name, host, port, user) {
-    document.getElementById("td-name").textContent = name;
-    document.getElementById("td-host").value = host || "";
-    document.getElementById("td-port").value = port || 22;
-    document.getElementById("td-user").value = user || "root";
-    document.getElementById("td-form").action = "/servers/" + id + "/teardown";
+  // Data arrives via data-* attributes (never interpolated into JS code), so a
+  // hostile server name / host / user can't break out into script.
+  function openTeardown(btn) {
+    var d = btn.dataset;
+    document.getElementById("td-name").textContent = d.name;
+    document.getElementById("td-host").value = d.host || "";
+    document.getElementById("td-port").value = d.port || 22;
+    document.getElementById("td-user").value = d.user || "root";
+    document.getElementById("td-form").action = "/servers/" + encodeURIComponent(d.id) + "/teardown";
     document.getElementById("td-overlay").classList.add("open");
   }
   function closeTeardown() {
@@ -178,11 +181,12 @@
     });
   });
 
-  function openDelete(id, name, videos) {
-    delId = id;
-    document.getElementById("del-name").textContent = name;
+  function openDelete(btn) {
+    var d = btn.dataset;
+    delId = d.id;
+    document.getElementById("del-name").textContent = d.name;
     document.getElementById("del-note").textContent =
-      "На сервере " + videos + " скачанных видео.";
+      "На сервере " + d.videos + " скачанных видео.";
     var rb = document.getElementById("del-redist");
     rb.disabled = !CAN_REDISTRIBUTE;
     rb.title = CAN_REDISTRIBUTE ? "" : "Нужен хотя бы ещё один сервер на связи";

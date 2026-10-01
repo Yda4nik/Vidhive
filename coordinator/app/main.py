@@ -35,6 +35,27 @@ _NO_PUBLISH = ("/lease", "/heartbeat")
 _SWEEP_INTERVAL = 15  # seconds
 _METRICS_RETENTION_MINUTES = 30
 
+# Pages here use inline <script>/handlers, so script-src keeps 'unsafe-inline';
+# this CSP therefore does not stop injected inline script by itself — the XSS fix is
+# that user data never reaches JS code (see tests/test_xss.py). What it does buy:
+# no framing (clickjacking), no plugins, no <base> hijack, forms/XHR/media/images
+# only to this origin. Swagger UI (/docs) loads assets from a CDN, so it is exempt.
+_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; "
+    "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
+_CSP_EXEMPT = ("/docs", "/redoc", "/openapi.json")
+
+
+def _add_security_headers(request: Request, response) -> None:
+    h = response.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Referrer-Policy", "same-origin")
+    if not request.url.path.startswith(_CSP_EXEMPT):
+        h.setdefault("Content-Security-Policy", _CSP)
+
 
 async def _completion_sweeper() -> None:
     """Safety net: finish any running job whose work is fully done.
@@ -114,6 +135,7 @@ def create_app() -> FastAPI:
             and not request.url.path.endswith(_NO_PUBLISH)
         ):
             bus.publish()
+        _add_security_headers(request, response)
         return response
 
     # Attach the current user to request.state from the session cookie. Added

@@ -51,7 +51,7 @@ def test_cannot_delete_system_favorites_group(client):
 
 
 def _row(item_id):
-    return f'data-id="{item_id}"'
+    return f'<tr class="vid" data-id="{item_id}"'
 
 
 def test_favorite_and_filter(client):

@@ -28,11 +28,14 @@
         <td class="muted">{{ w.last_heartbeat_at.strftime("%Y-%m-%d %H:%M") if w.last_heartbeat_at else "—" }}</td>
         <td style="white-space:nowrap">
           <button class="del" title="Удалить сервер"
-                  onclick="openDelete({{ w.id }}, '{{ w.name|e }}', {{ videos.get(w.id, 0) }})">🗑</button>
+                  data-id="{{ w.id }}" data-name="{{ w.name }}" data-videos="{{ videos.get(w.id, 0) }}"
+                  onclick="openDelete(this)">🗑</button>
           {% set dep = deployed.get(w.id) %}
           {% if dep %}
           <button class="del" title="Снести с машины по SSH"
-                  onclick="openTeardown({{ w.id }}, '{{ w.name|e }}', '{{ dep.ssh_host }}', {{ dep.ssh_port }}, '{{ dep.ssh_user }}')">🧨</button>
+                  data-id="{{ w.id }}" data-name="{{ w.name }}" data-host="{{ dep.ssh_host }}"
+                  data-port="{{ dep.ssh_port }}" data-user="{{ dep.ssh_user }}"
+                  onclick="openTeardown(this)">🧨</button>
           {% endif %}
         </td>
       </tr>

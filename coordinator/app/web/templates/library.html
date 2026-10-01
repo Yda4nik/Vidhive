@@ -45,7 +45,7 @@
       <span class="tab {{ 'active' if group == g.id|string else '' }}" onclick="setParam('group','{{ g.id }}')">
         {{ g.name }} <span class="cnt">{{ g.count }}</span>
         {% if can_edit %}
-        <span class="mini" title="Переименовать" onclick="renameGroup({{ g.id }}, '{{ g.name }}', event)">✎</span>
+        <span class="mini" title="Переименовать" data-id="{{ g.id }}" data-name="{{ g.name }}" onclick="renameGroup(this, event)">✎</span>
         <span class="mini" title="Удалить группу" onclick="deleteGroup({{ g.id }}, event)">✕</span>
         {% endif %}
       </span>
@@ -151,7 +151,7 @@
 </div>
 
 <script>
-  function GROUP() { return "{{ group }}"; }
+  function GROUP() { return {{ group|tojson }}; }
   function fmtT(s) {
     s = Math.floor(s || 0);
     var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
@@ -281,10 +281,11 @@
       if (n && n.trim()) post("/api/groups", { name: n.trim() }).then(afterOk);
     });
   }
-  function renameGroup(id, cur, ev) {
+  function renameGroup(el, ev) {
     ev.stopPropagation();
+    var id = el.dataset.id, cur = el.dataset.name;      // data-*: never interpolated into JS
     vhPrompt("Новое название группы", cur).then(function (n) {
-      if (n && n.trim()) fetch("/api/groups/" + id, { method: "PATCH",
+      if (n && n.trim()) fetch("/api/groups/" + encodeURIComponent(id), { method: "PATCH",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n.trim() }) }).then(afterOk);
     });
   }

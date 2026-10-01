@@ -196,9 +196,12 @@
     updateThemeIcon();
   </script>
 
+  {% if request.state.user %}
   <script>
     // Real-time: a persistent SSE channel. The server pushes "update" the moment
     // state changes; the current page's liveRefresh() re-renders instantly.
+    // Only for signed-in users: the stream requires a session, and the login page
+    // would otherwise be redirected to HTML and log a console error.
     (function () {
       if (!window.EventSource) return;
       var timer = null;
@@ -219,5 +222,6 @@
       window.addEventListener("pagehide", function () { if (es) es.close(); });
     })();
   </script>
+  {% endif %}
 </body>
 </html>
