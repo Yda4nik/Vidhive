@@ -17,6 +17,25 @@ STORAGE_PATH="${VIDHIVE_STORAGE_PATH:-/var/lib/vidhive/videos}"
 
 step() { echo ">>> $*"; }
 
+# Safety: this script runs `rm -rf` as root. Refuse anything that is not a clean
+# absolute path inside a vidhive-named directory (never "/", "/home", "/var" ...).
+guard_path() {
+  local label="$1" p="$2"
+  case "$p" in
+    /*) ;;
+    *) echo "REFUSING: $label '$p' is not an absolute path" >&2; exit 1 ;;
+  esac
+  case "$p" in
+    *..*|*[!A-Za-z0-9._/-]*) echo "REFUSING: $label '$p' contains unsafe characters" >&2; exit 1 ;;
+  esac
+  case "$p" in
+    */vidhive*) ;;
+    *) echo "REFUSING: $label '$p' is not inside a vidhive directory" >&2; exit 1 ;;
+  esac
+}
+guard_path INSTALL_DIR "$INSTALL_DIR"
+guard_path STORAGE_PATH "$STORAGE_PATH"
+
 SUDO=""
 if [ "$(id -u)" != "0" ]; then
   if command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else

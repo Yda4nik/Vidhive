@@ -161,6 +161,32 @@ async def reclaim_expired(session: AsyncSession) -> int:
     return count
 
 
+async def mark_stale_workers(session: AsyncSession, offline_after_seconds: int) -> int:
+    """Flip workers that stopped heartbeating to ``offline``. Returns how many.
+
+    Without this a dead agent stays "online" forever: the dashboard counts it,
+    and "distribute to other servers" would pick it as a target.
+    """
+    cutoff = _now() - timedelta(seconds=offline_after_seconds)
+    result = await session.execute(
+        update(Worker)
+        .where(Worker.state == "online")
+        .where(or_(Worker.last_heartbeat_at.is_(None), Worker.last_heartbeat_at < cutoff))
+        .values(state="offline")
+    )
+    count = result.rowcount or 0
+    if count:
+        log_event(
+            session,
+            component="workers",
+            operation="offline",
+            level="warning",
+            result="offline",
+            message=f"{count} worker(s) silent for >{offline_after_seconds}s marked offline",
+        )
+    return count
+
+
 async def _worker_has_space(session: AsyncSession, worker: Worker) -> bool:
     """Stop issuing work to a worker that is running out of disk (spec 6.3)."""
     metric = (

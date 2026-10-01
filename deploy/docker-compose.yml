@@ -2,6 +2,7 @@ name: vidhive
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vidhive}
@@ -18,6 +19,7 @@ services:
 
   # Coordinator serves both the REST API and the web dashboard (UI at /).
   coordinator:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: coordinator/Dockerfile
@@ -43,6 +45,7 @@ services:
   # Controllable stand-in for the target service, for safe end-to-end runs
   # (spec sections 20 and 23). Returns 200+video / 404 / 403 / 429 / 500 by id.
   mock:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: mock/Dockerfile
@@ -53,6 +56,7 @@ services:
     networks: [vidhive]
 
   agent-01:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: agent/Dockerfile
@@ -75,6 +79,7 @@ services:
     networks: [vidhive]
 
   agent-02:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: agent/Dockerfile
@@ -95,6 +100,7 @@ services:
     networks: [vidhive]
 
   agent-03:
+    restart: unless-stopped
     build:
       context: ..
       dockerfile: agent/Dockerfile

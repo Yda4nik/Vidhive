@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # Stop issuing blocks to a worker that is running out of disk (spec 6.3).
     min_free_space_gb: float = 5.0
 
+    # A worker silent for this long (agents heartbeat every ~5 s) is marked offline.
+    worker_offline_seconds: int = 30
+
     log_level: str = "INFO"
 
     # Access control (all from env; empty admin/token = feature effectively off).

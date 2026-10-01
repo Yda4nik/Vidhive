@@ -63,6 +63,12 @@ async def _completion_sweeper() -> None:
                     if await scheduler.maybe_complete_job(session, jid):
                         changed = True
 
+                # Agents that stopped heartbeating are no longer "online".
+                if await scheduler.mark_stale_workers(
+                    session, get_settings().worker_offline_seconds
+                ):
+                    changed = True
+
                 # Bound the metrics table so its "latest per worker" query stays fast.
                 cutoff = datetime.now(timezone.utc) - timedelta(minutes=_METRICS_RETENTION_MINUTES)
                 await session.execute(

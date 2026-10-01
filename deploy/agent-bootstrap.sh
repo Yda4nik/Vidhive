@@ -31,6 +31,22 @@ AGENT_PORT="${VIDHIVE_AGENT_PORT:-8100}"
 
 step() { echo ">>> $*"; }
 
+# Safety: values end up in /etc/vidhive-agent.env and on rm/mkdir paths, so refuse
+# anything with whitespace/newlines/quotes (prevents injecting extra env lines) and
+# keep the storage path inside a vidhive-named directory.
+STORAGE_PATH_VALUE="${VIDHIVE_STORAGE_PATH:-/var/lib/vidhive/videos}"
+for pair in "VIDHIVE_COORDINATOR_URL=$VIDHIVE_COORDINATOR_URL" "VIDHIVE_WORKER_NAME=$VIDHIVE_WORKER_NAME" \
+            "VIDHIVE_AGENT_URL=$VIDHIVE_AGENT_URL" "VIDHIVE_STORAGE_PATH=$STORAGE_PATH_VALUE" \
+            "VIDHIVE_AGENT_TOKEN=${VIDHIVE_AGENT_TOKEN:-}"; do
+  case "${pair#*=}" in
+    *[[:space:]\"\'\`\$\\]*) echo "REFUSING: ${pair%%=*} contains unsafe characters" >&2; exit 1 ;;
+  esac
+done
+case "$STORAGE_PATH_VALUE" in
+  /*vidhive*) ;;
+  *) echo "REFUSING: storage path '$STORAGE_PATH_VALUE' is not inside a vidhive directory" >&2; exit 1 ;;
+esac
+
 SUDO=""
 if [ "$(id -u)" != "0" ]; then
   if command -v sudo >/dev/null 2>&1; then SUDO="sudo"; else

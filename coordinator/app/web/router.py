@@ -9,6 +9,7 @@ so seeking works.
 from __future__ import annotations
 
 import asyncio
+import posixpath
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -25,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.bus import bus
 
 from app.api.jobs import (
-    create_job,
     pause_job,
     resume_job,
     retry_failed,
@@ -47,6 +47,26 @@ _INSTALL_DIR = "/opt/vidhive"
 _SERVICE_NAME = "vidhive-agent"
 _DEFAULT_STORAGE = "/var/lib/vidhive/videos"
 _WORKER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,150}$")
+# Safe characters only: no spaces, quotes, newlines or shell/env metacharacters.
+_STORAGE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+_AGENT_URL_RE = re.compile(r"^https?://[A-Za-z0-9._:\[\]-]+(/[A-Za-z0-9._~/%-]*)?$")
+
+
+def _storage_path_error(path: str) -> str | None:
+    """Reject paths that teardown (`rm -rf` as root) must never be pointed at.
+
+    The path has to be a clean absolute path that contains a ``vidhive*``
+    directory, so deleting it can only ever remove a Vidhive-owned tree — never
+    ``/``, ``/home``, ``/var`` etc.
+    """
+    p = path.strip()
+    if not _STORAGE_PATH_RE.match(p):
+        return "путь хранилища: только латиница, цифры и . _ - /, без пробелов"
+    if posixpath.normpath(p) != p.rstrip("/") or ".." in p.split("/"):
+        return "путь хранилища не должен содержать .. или лишние слэши"
+    if not any(seg.startswith("vidhive") for seg in p.split("/") if seg):
+        return "путь хранилища должен содержать каталог vidhive (например /var/lib/vidhive/videos)"
+    return None
 from app.core.sources import NUMERIC_SOURCES, SUPPORTED_MODES, source_from_url
 from app.db.models import (
     FileRecord,
@@ -61,7 +81,6 @@ from app.db.models import (
 )
 from app.db.session import get_session, get_sessionmaker
 from vidhive_common.enums import ItemStatus
-from vidhive_common.schemas import JobCreate
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -333,8 +352,13 @@ async def server_deploy(
         errors.append("имя воркера: только буквы, цифры, _ и -")
     if not (1 <= ssh_port <= 65535):
         errors.append("порт SSH вне диапазона")
-    if not storage_path.strip().startswith("/"):
-        errors.append("путь хранилища должен быть абсолютным")
+    path_err = _storage_path_error(storage_path)
+    if path_err:
+        errors.append(path_err)
+    if not _AGENT_URL_RE.match(agent_url):
+        errors.append("адрес агента: ожидается http(s)://хост[:порт]")
+    if not (1 <= threads <= 512):
+        errors.append("потоки: от 1 до 512")
     if not ssh_host or not (ssh_key.strip() or ssh_password):
         errors.append("укажите хост и пароль или SSH-ключ")
     if errors:
@@ -432,6 +456,13 @@ async def server_teardown(
         return RedirectResponse("/servers?error=сервер+развёрнут+не+по+SSH", status_code=303)
     if not (ssh_key.strip() or ssh_password):
         return RedirectResponse("/servers?error=нужен+пароль+или+SSH-ключ", status_code=303)
+    # Never run `rm -rf` as root on a path that isn't a Vidhive-owned tree, even if a
+    # bad value is already stored from before this check existed.
+    if _storage_path_error(dep_row.storage_path):
+        return RedirectResponse(
+            "/servers?error=" + quote("небезопасный путь хранилища в записи сервера — снос отменён"),
+            status_code=303,
+        )
 
     env = {
         "INSTALL_DIR": dep_row.install_dir,
@@ -490,13 +521,28 @@ async def setup_submit(
     return RedirectResponse("/", status_code=303)
 
 
+def _safe_next(target: str | None) -> str:
+    """Only same-site absolute paths are valid post-login targets.
+
+    Rejects ``https://evil``, ``//evil`` (protocol-relative), ``/\\evil`` (browsers
+    treat the backslash as a slash) and anything with control characters, so the
+    login form can't be used as an open redirect for phishing.
+    """
+    t = (target or "").strip()
+    if not t.startswith("/") or t.startswith("//") or t.startswith("/\\"):
+        return "/"
+    if any(ord(c) < 32 or c == "\\" for c in t):
+        return "/"
+    return t
+
+
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(
     request: Request, next: str = "/", error: str = "", session: AsyncSession = Depends(get_session)
 ):
     if await _user_count(session) == 0:
         return RedirectResponse("/setup", status_code=303)
-    return _page(request, "login.html", {"next": next, "error": error})
+    return _page(request, "login.html", {"next": _safe_next(next), "error": error})
 
 
 @router.post("/login")
@@ -510,10 +556,11 @@ async def login_submit(
     user = (
         await session.execute(select(User).where(User.username == username))
     ).scalar_one_or_none()
+    next = _safe_next(next)
     if user is None or not verify_password(password, user.password_hash):
         return _page(request, "login.html", {"next": next, "error": "Неверный логин или пароль"})
     request.session["user_id"] = user.id
-    return RedirectResponse(url=next or "/", status_code=303)
+    return RedirectResponse(url=next, status_code=303)
 
 
 @router.post("/logout")

@@ -16,6 +16,7 @@ from app.db.models import Item, Job, JobTarget, RangeChunk, Worker, WorkerMetric
 from app.db.session import get_session
 from app.services import scheduler
 from app.services.auth import require_agent_token, require_role
+from app.services.bus import bus
 from app.services.events import log_event
 from vidhive_common.enums import ChunkStatus, ItemStatus, JobState, WorkerState
 from vidhive_common.schemas import (
@@ -201,6 +202,7 @@ async def heartbeat(
     session: AsyncSession = Depends(get_session),
 ) -> Ack:
     worker = await _get_worker_or_404(session, worker_id)
+    came_back = worker.state != WorkerState.ONLINE.value
     worker.state = WorkerState.ONLINE.value
     await scheduler.renew_worker_leases(session, worker, lease_seconds, payload.active_chunk_id)
 
@@ -221,6 +223,8 @@ async def heartbeat(
             )
         )
     await session.commit()
+    if came_back:
+        bus.publish()  # heartbeats are not published by the middleware; a recovery must be
     return Ack()
 
 
