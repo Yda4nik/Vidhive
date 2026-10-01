@@ -171,7 +171,11 @@
     if (e.target === this) closeTeardown();
   });
   document.getElementById("td-form").addEventListener("submit", function (e) {
-    if (!confirm("Полностью снести агента с этой машины? Файлы и код будут удалены.")) e.preventDefault();
+    e.preventDefault();
+    var f = this;
+    vhConfirm("Полностью снести агента с этой машины? Файлы и код будут удалены.").then(function (ok) {
+      if (ok) f.submit();
+    });
   });
 
   function openDelete(id, name, videos) {
@@ -193,11 +197,14 @@
     var human = mode === "redistribute"
       ? "Распределить видео по другим серверам и удалить этот сервер?"
       : "Удалить сервер вместе со всеми его файлами? Это необратимо.";
-    if (!confirm(human)) return;
-    var form = document.getElementById("del-form");
-    form.action = "/servers/" + delId + "/delete";
-    document.getElementById("del-mode").value = mode;
-    form.submit();
+    var id = delId;
+    vhConfirm(human).then(function (ok) {
+      if (!ok) return;
+      var form = document.getElementById("del-form");
+      form.action = "/servers/" + id + "/delete";
+      document.getElementById("del-mode").value = mode;
+      form.submit();
+    });
   }
   // Click on the dim backdrop closes the dialog.
   document.getElementById("del-overlay").addEventListener("click", function (e) {

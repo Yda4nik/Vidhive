@@ -76,14 +76,13 @@
           {% endif %}
         </td>
         <td style="white-space:nowrap">
-          <form method="post" action="/users/{{ u.id }}/password" class="inline"
-                onsubmit="this.pw.value=prompt('Новый пароль для {{ u.username }}')||''; return !!this.pw.value">
+          <form method="post" action="/users/{{ u.id }}/password" class="inline">
             <input type="hidden" name="password" class="pw">
-            <span class="btn" onclick="this.closest('form').requestSubmit()">Сбросить пароль</span>
+            <span class="btn" onclick="resetPassword(this.closest('form'), '{{ u.username|e }}')">Сбросить пароль</span>
           </form>
           {% if not locked %}
           <form method="post" action="/users/{{ u.id }}/delete" class="inline"
-                onsubmit="return confirm('Удалить пользователя {{ u.username }}?')">
+                onsubmit="return vhConfirmForm(this, 'Удалить пользователя {{ u.username|e }}?')">
             <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="🗑">
           </form>
           {% endif %}
@@ -93,4 +92,13 @@
     </tbody>
   </table>
 </div>
+
+<script>
+  function resetPassword(form, username) {
+    vhPrompt('Новый пароль для ' + username, '', { input: 'password', okText: 'Сбросить', placeholder: 'новый пароль' })
+      .then(function (pw) {
+        if (pw && pw.trim()) { form.querySelector('.pw').value = pw; form.submit(); }
+      });
+  }
+</script>
 {% endblock %}

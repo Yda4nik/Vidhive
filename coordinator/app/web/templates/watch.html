@@ -129,13 +129,15 @@
     var btn = document.getElementById('fav-btn');
     var on = btn.textContent === '☆';
     post('/api/library/favorite', { item_ids: [ITEM], on: on }).then(function (r) {
-      if (r.ok) btn.textContent = on ? '★' : '☆'; else alert('Ошибка: ' + r.status);
+      if (r.ok) btn.textContent = on ? '★' : '☆'; else vhAlert('Ошибка: ' + r.status);
     });
   }
   function delVideo() {
-    if (!confirm('Удалить это видео вместе с файлом?')) return;
-    post('/api/library/delete', { item_ids: [ITEM] }).then(function (r) {
-      if (r.ok) location.href = '/library'; else alert('Ошибка: ' + r.status);
+    vhConfirm('Удалить это видео вместе с файлом?').then(function (ok) {
+      if (!ok) return;
+      post('/api/library/delete', { item_ids: [ITEM] }).then(function (r) {
+        if (r.ok) location.href = '/library'; else vhAlert('Ошибка: ' + r.status);
+      });
     });
   }
 
@@ -219,7 +221,7 @@
       ? fetch('/api/notes/' + editId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ label: label, color: pickColor }) })
       : post('/api/notes', { external_id: EXT, t_seconds: t, label: label, color: pickColor });
-    req.then(function (r) { if (r.ok) { box.hidden = true; loadNotes(); } else alert('Ошибка: ' + r.status); });
+    req.then(function (r) { if (r.ok) { box.hidden = true; loadNotes(); } else vhAlert('Ошибка: ' + r.status); });
   }
 
   function editNote(id) {
@@ -236,8 +238,10 @@
     document.getElementById('na-label').focus();
   }
   function delNote(id) {
-    if (!confirm('Удалить заметку?')) return;
-    fetch('/api/notes/' + id, { method: 'DELETE' }).then(function (r) { if (r.ok) loadNotes(); });
+    vhConfirm('Удалить заметку?').then(function (ok) {
+      if (!ok) return;
+      fetch('/api/notes/' + id, { method: 'DELETE' }).then(function (r) { if (r.ok) loadNotes(); });
+    });
   }
 </script>
 {% endblock %}

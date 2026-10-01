@@ -131,7 +131,7 @@
 
   document.querySelectorAll(".srcbtn").forEach(function (b) {
     b.onclick = function () {
-      if (b.classList.contains("disabled")) { alert("YouTube пока в разработке"); return; }
+      if (b.classList.contains("disabled")) { vhAlert("Источник недоступен"); return; }
       setSource(b.dataset.src);
     };
   });
@@ -142,11 +142,13 @@
   function retryErrors() {
     var scope = document.getElementById("retry-scope").value;
     var url = scope === "all" ? "/api/jobs/retry-all" : "/api/jobs/" + scope + "/retry";
-    fetch(url, { method: "POST" }).then(function (r) { if (!r.ok) alert("Ошибка: " + r.status); });
+    fetch(url, { method: "POST" }).then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); });
   }
   function deleteJob(id) {
-    if (!confirm("Удалить задание #" + id + " и все скачанные им видео?")) return;
-    fetch("/api/jobs/" + id, { method: "DELETE" }).then(function (r) { if (!r.ok) alert("Ошибка: " + r.status); });
+    vhConfirm("Удалить задание #" + id + " и все скачанные им видео?").then(function (ok) {
+      if (!ok) return;
+      fetch("/api/jobs/" + id, { method: "DELETE" }).then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); });
+    });
   }
 
   // ---- live refresh of the jobs table ----

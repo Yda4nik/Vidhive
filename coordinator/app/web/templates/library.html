@@ -250,7 +250,7 @@
     return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body) });
   }
-  function afterOk(r) { if (r.ok) location.reload(); else alert("Ошибка: " + r.status); }
+  function afterOk(r) { if (r.ok) location.reload(); else vhAlert("Ошибка: " + r.status); }
 
   function bulk(url, extra) {
     var body = Object.assign({ item_ids: Array.from(selected) }, extra || {});
@@ -259,8 +259,9 @@
   function bulkFav() { bulk("/api/library/favorite", { on: true }); }
   function bulkAssign(gid) { bulk("/api/library/assign", { group_id: gid }); }
   function bulkDelete() {
-    if (confirm("Удалить выбранные видео (" + selected.size + ") вместе с файлами?"))
-      bulk("/api/library/delete");
+    vhConfirm("Удалить выбранные видео (" + selected.size + ") вместе с файлами?").then(function (ok) {
+      if (ok) bulk("/api/library/delete");
+    });
   }
 
   function toggleFav(id, on, ev) {
@@ -269,25 +270,29 @@
   }
   function delOne(id, ev) {
     ev.stopPropagation();
-    if (confirm("Удалить это видео вместе с файлом?"))
-      post("/api/library/delete", { item_ids: [id] }).then(afterOk);
+    vhConfirm("Удалить это видео вместе с файлом?").then(function (ok) {
+      if (ok) post("/api/library/delete", { item_ids: [id] }).then(afterOk);
+    });
   }
 
   // ---- groups ----
   function newGroup() {
-    var n = prompt("Название новой группы");
-    if (n) post("/api/groups", { name: n }).then(afterOk);
+    vhPrompt("Название новой группы", "", { placeholder: "например, Курс" }).then(function (n) {
+      if (n && n.trim()) post("/api/groups", { name: n.trim() }).then(afterOk);
+    });
   }
   function renameGroup(id, cur, ev) {
     ev.stopPropagation();
-    var n = prompt("Новое название группы", cur);
-    if (n) fetch("/api/groups/" + id, { method: "PATCH",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) }).then(afterOk);
+    vhPrompt("Новое название группы", cur).then(function (n) {
+      if (n && n.trim()) fetch("/api/groups/" + id, { method: "PATCH",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n.trim() }) }).then(afterOk);
+    });
   }
   function deleteGroup(id, ev) {
     ev.stopPropagation();
-    if (confirm("Удалить группу? Видео останутся в библиотеке."))
-      fetch("/api/groups/" + id, { method: "DELETE" }).then(afterOk);
+    vhConfirm("Удалить группу? Видео останутся в библиотеке.").then(function (ok) {
+      if (ok) fetch("/api/groups/" + id, { method: "DELETE" }).then(afterOk);
+    });
   }
 </script>
 {% endblock %}

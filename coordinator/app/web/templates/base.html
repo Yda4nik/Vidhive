@@ -69,6 +69,15 @@
     .bar { height:6px; background:var(--bar-bg); border-radius:3px; overflow:hidden; margin-bottom:4px; min-width:110px; }
     .bar span { display:block; height:100%; background:var(--accent); }
     .tiny { font-size:11px; color:var(--muted); opacity:.85; }
+    /* In-app dialogs (replace browser confirm/prompt/alert). */
+    .vh-overlay { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex;
+      align-items:center; justify-content:center; z-index:1000; padding:16px; }
+    .vh-dialog { background:var(--card); border:1px solid var(--line); border-radius:14px;
+      padding:22px; max-width:440px; width:100%; box-shadow:0 12px 44px rgba(0,0,0,.45); }
+    .vh-dialog .vh-msg { margin:0 0 14px; font-size:15px; white-space:pre-wrap; }
+    .vh-dialog .vh-input { margin-bottom:14px; }
+    .vh-dialog .vh-actions { display:flex; justify-content:flex-end; gap:10px; }
+    .vh-dialog .vh-ok.danger { background:var(--bad); border-color:var(--bad); color:#fff; }
   </style>
 </head>
 <body>
@@ -94,6 +103,82 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+
+  {# Reusable in-app dialog (confirm / prompt / alert). #}
+  <div class="vh-overlay" id="vh-modal" hidden>
+    <div class="vh-dialog" role="dialog" aria-modal="true">
+      <p class="vh-msg"></p>
+      <input class="vh-input" type="text" hidden>
+      <div class="vh-actions">
+        <button type="button" class="btn vh-cancel">Отмена</button>
+        <button type="button" class="btn primary vh-ok">OK</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var modal = document.getElementById("vh-modal");
+      var msgEl = modal.querySelector(".vh-msg");
+      var inp = modal.querySelector(".vh-input");
+      var okBtn = modal.querySelector(".vh-ok");
+      var cancelBtn = modal.querySelector(".vh-cancel");
+      var keyHandler = null;
+
+      function open(opts) {
+        return new Promise(function (resolve) {
+          msgEl.textContent = opts.message || "";
+          if (opts.input) {
+            inp.hidden = false;
+            inp.type = opts.input === "password" ? "password" : "text";
+            inp.value = opts.value || "";
+            inp.placeholder = opts.placeholder || "";
+          } else {
+            inp.hidden = true;
+            inp.value = "";
+          }
+          okBtn.textContent = opts.okText || "OK";
+          cancelBtn.textContent = opts.cancelText || "Отмена";
+          cancelBtn.hidden = !!opts.alert;          // alert has a single button
+          okBtn.classList.toggle("danger", !!opts.danger);
+          modal.hidden = false;
+
+          function cleanup() {
+            modal.hidden = true;
+            okBtn.onclick = cancelBtn.onclick = modal.onclick = inp.onkeydown = null;
+            document.removeEventListener("keydown", keyHandler, true);
+          }
+          function accept() { cleanup(); resolve(opts.input ? inp.value : true); }
+          function reject() { cleanup(); resolve(opts.input ? null : false); }
+
+          okBtn.onclick = accept;
+          cancelBtn.onclick = reject;
+          modal.onclick = function (e) { if (e.target === modal && !opts.alert) reject(); };
+          inp.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); accept(); } };
+          keyHandler = function (e) {
+            if (e.key === "Enter" && !opts.input) { e.preventDefault(); accept(); }
+            else if (e.key === "Escape" && !opts.alert) { e.preventDefault(); reject(); }
+          };
+          document.addEventListener("keydown", keyHandler, true);  // capture, before page handlers
+          setTimeout(function () { (opts.input ? inp : okBtn).focus(); }, 30);
+        });
+      }
+
+      window.vhConfirm = function (message, opts) {
+        return open(Object.assign({ message: message, danger: true, okText: "Да", cancelText: "Отмена" }, opts || {}));
+      };
+      window.vhPrompt = function (message, value, opts) {
+        return open(Object.assign({ message: message, input: "text", value: value || "", okText: "OK" }, opts || {}));
+      };
+      window.vhAlert = function (message) {
+        return open({ message: message, alert: true, okText: "OK" });
+      };
+      // For `onsubmit="return vhConfirmForm(this, '...')"` — confirm, then submit.
+      window.vhConfirmForm = function (form, message) {
+        vhConfirm(message).then(function (ok) { if (ok) form.submit(); });
+        return false;
+      };
+    })();
+  </script>
   <script>
     function updateThemeIcon() {
       var b = document.getElementById("theme-btn");
