@@ -6,26 +6,26 @@ This is the coordinator side of the block protocol. Agents (stage 3) drive it.
 import logging
 from datetime import datetime, timezone
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.sources import template_for
-from app.db.models import Item, Job, JobTarget, RangeChunk, Worker, WorkerMetric
+from app.db.models import Job, Worker, WorkerMetric
 from app.db.session import get_session
-from app.services import scheduler
-from app.services.agent_client import agent_headers, file_url, validate_agent_url
+from app.services import drain, scheduler
+from app.services.agent_client import validate_agent_url
 from app.services.auth import require_agent_token, require_role
 from app.services.bus import bus
 from app.services.events import log_event
-from vidhive_common.enums import ChunkStatus, ItemStatus, JobState, WorkerState
+from vidhive_common.enums import ChunkStatus, WorkerState
 from vidhive_common.schemas import (
     Ack,
     ChunkComplete,
     ChunkLease,
     Heartbeat,
     LeaseRequest,
+    ProgressAck,
     ProgressReport,
     WorkerOut,
     WorkerRegister,
@@ -65,7 +65,8 @@ async def register_worker(
     worker.agent_version = payload.agent_version
     worker.threads = payload.threads
     worker.storage_path = payload.storage_path
-    worker.state = WorkerState.ONLINE.value
+    if worker.state != WorkerState.DRAINING.value:  # a draining server stays draining
+        worker.state = WorkerState.ONLINE.value
     worker.last_heartbeat_at = datetime.now(timezone.utc)
     await session.flush()
 
@@ -94,33 +95,6 @@ async def get_worker(worker_id: int, session: AsyncSession = Depends(get_session
     return await _get_worker_or_404(session, worker_id)
 
 
-async def _redistribute_worker_videos(session: AsyncSession, worker: Worker, items: list[Item]) -> int:
-    """Re-queue the identifiers a departing worker holds so another server fetches them again.
-
-    Files can't be moved between machines, but we still have the source ids: a fresh
-    re-download job (one single-id target per video, grouped by source) lets a surviving
-    online worker pull the same videos onto itself. The old copy is removed afterwards.
-    """
-    ids_by_source: dict[str, set[int]] = {}
-    for it in items:
-        job = await session.get(Job, it.job_id)
-        source = job.source if job else "kinescope"
-        ids_by_source.setdefault(source, set()).add(it.external_id)
-
-    total = 0
-    for source, ids in ids_by_source.items():
-        new_job = Job(name=f"Перенос с «{worker.name}»", source=source)
-        session.add(new_job)
-        await session.flush()
-        for ext in sorted(ids):
-            session.add(JobTarget(job_id=new_job.id, range_start=ext, range_end=ext, url=None))
-        await session.flush()
-        await scheduler.initialize_job_chunks(session, new_job)
-        new_job.state = JobState.RUNNING.value
-        total += len(ids)
-    return total
-
-
 @router.delete("/{worker_id}", response_model=Ack,
                dependencies=[Depends(require_role("administrator"))])
 async def delete_worker(
@@ -130,22 +104,17 @@ async def delete_worker(
 ) -> Ack:
     """Remove a server from the network.
 
-    * ``purge``        — delete the server together with every file it downloaded.
-    * ``redistribute`` — first re-queue its videos so a surviving online server
-      re-downloads them, then remove the server and its files.
+    * ``purge``        — delete it now, together with every file it downloaded.
+    * ``redistribute`` — mark it *draining*: it takes no new work, a re-download is
+      queued for videos that exist only on it, and the coordinator removes it once
+      every one of them has a copy elsewhere. Nothing is deleted before that, so a
+      failed re-download can never lose a video.
     """
     worker = await _get_worker_or_404(session, worker_id)
 
-    completed = (
-        await session.execute(
-            select(Item)
-            .where(Item.worker_id == worker.id)
-            .where(Item.status == ItemStatus.COMPLETED.value)
-        )
-    ).scalars().all()
-
-    requeued = 0
     if mode == "redistribute":
+        if worker.state == WorkerState.DRAINING.value:
+            raise HTTPException(status_code=409, detail="сервер уже переносит свои видео")
         others = (
             await session.execute(
                 select(func.count())
@@ -159,43 +128,13 @@ async def delete_worker(
                 status_code=409,
                 detail="нет других серверов в сети для распределения — используйте удаление с данными",
             )
-        requeued = await _redistribute_worker_videos(session, worker, completed)
+        await drain.start_drain(session, worker)
+        # Nothing exclusive to this server (or nothing at all): no need to wait.
+        if not await drain.unmigrated_items(session, worker.id):
+            await drain.purge_worker(session, worker, reason="redistribute")
+    else:
+        await drain.purge_worker(session, worker, reason="purge")
 
-    # Delete the physical files on the agent (best-effort — it may already be offline).
-    if worker.agent_url:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            for it in completed:
-                try:
-                    await client.delete(
-                        file_url(worker.agent_url, it.external_id), headers=agent_headers()
-                    )
-                except httpx.HTTPError as exc:
-                    log.warning("agent file delete failed for %s: %s", it.external_id, exc)
-
-    # Return any chunk this worker was holding to the queue so others pick it up now.
-    await session.execute(
-        update(RangeChunk)
-        .where(RangeChunk.leased_by == worker.id)
-        .where(RangeChunk.status == ChunkStatus.LEASED.value)
-        .values(status=ChunkStatus.PENDING.value, leased_by=None, lease_expires_at=None)
-    )
-
-    # Drop this worker's completed items (and their metadata/downloads/files/library rows).
-    for it in completed:
-        await session.delete(it)
-
-    log_event(
-        session,
-        component="workers",
-        operation="delete",
-        result=mode,
-        worker_id=worker.id,
-        message=(
-            f"{worker.name} removed ({mode}); {len(completed)} file(s) purged"
-            + (f", {requeued} re-queued" if mode == "redistribute" else "")
-        ),
-    )
-    await session.delete(worker)  # cascades metrics; SET NULL on any remaining references
     await session.commit()
     return Ack()
 
@@ -209,8 +148,9 @@ async def heartbeat(
     session: AsyncSession = Depends(get_session),
 ) -> Ack:
     worker = await _get_worker_or_404(session, worker_id)
-    came_back = worker.state != WorkerState.ONLINE.value
-    worker.state = WorkerState.ONLINE.value
+    came_back = worker.state not in (WorkerState.ONLINE.value, WorkerState.DRAINING.value)
+    if worker.state != WorkerState.DRAINING.value:
+        worker.state = WorkerState.ONLINE.value
     await scheduler.renew_worker_leases(session, worker, lease_seconds, payload.active_chunk_id)
 
     # Store a metrics sample if the heartbeat carried resource data.
@@ -264,20 +204,24 @@ async def lease(
     )
 
 
-@router.post("/{worker_id}/progress", response_model=Ack,
+@router.post("/{worker_id}/progress", response_model=ProgressAck,
              dependencies=[Depends(require_agent_token)])
 async def progress(
     worker_id: int,
     report: ProgressReport,
     session: AsyncSession = Depends(get_session),
-) -> Ack:
+) -> ProgressAck:
+    """Record a batch. 409 = this worker no longer holds the chunk (abandon it);
+    ``proceed=false`` = the job was paused/stopped (batch recorded, stop working)."""
     worker = await _get_worker_or_404(session, worker_id)
     try:
-        await scheduler.apply_progress(session, worker, report)
+        _, proceed = await scheduler.apply_progress(session, worker, report)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except scheduler.StaleLease as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
-    return Ack()
+    return ProgressAck(proceed=proceed)
 
 
 @router.post("/{worker_id}/complete", response_model=Ack,
@@ -289,9 +233,13 @@ async def complete(
 ) -> Ack:
     await _get_worker_or_404(session, worker_id)
     try:
-        chunk = await scheduler.complete_chunk(session, payload.chunk_id, payload.status)
+        chunk = await scheduler.complete_chunk(
+            session, payload.chunk_id, payload.status, worker_id=worker_id
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except scheduler.StaleLease as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await scheduler.maybe_complete_job(session, chunk.job_id)
     await session.commit()
     return Ack()
@@ -307,8 +255,12 @@ async def fail(
     """Report a chunk as failed; it returns to the queue for another worker."""
     await _get_worker_or_404(session, worker_id)
     try:
-        await scheduler.complete_chunk(session, payload.chunk_id, ChunkStatus.FAILED)
+        await scheduler.complete_chunk(
+            session, payload.chunk_id, ChunkStatus.FAILED, worker_id=worker_id
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except scheduler.StaleLease as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.commit()
     return Ack()

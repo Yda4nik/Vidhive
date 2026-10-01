@@ -42,6 +42,12 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class StaleLease(Exception):
+    """The reporting worker no longer holds this chunk (lease expired and the chunk
+    was reclaimed, or it was handed to someone else). Its report must be rejected so
+    a slow/stale agent can't overwrite or release work another agent now owns."""
+
+
 def _source_of(url: str | None) -> str | None:
     """Short source name from a URL host, e.g. 'kinescope' or 'youtube'."""
     if not url:
@@ -253,6 +259,8 @@ async def lease_chunk(
     session: AsyncSession, worker: Worker, lease_seconds: int
 ) -> RangeChunk | None:
     """Lease the next available chunk to ``worker``, generating one if needed."""
+    if worker.state == "draining":
+        return None  # being emptied: it keeps serving files but takes no new work
     await reclaim_expired(session)
 
     if not await _worker_has_space(session, worker):
@@ -332,20 +340,35 @@ async def _upsert_item(session: AsyncSession, job_id: int, worker_id: int, exter
     return existing
 
 
-async def apply_progress(session: AsyncSession, worker: Worker, report: ProgressReport) -> RangeChunk:
-    """Advance a chunk's checkpoint and record item results idempotently."""
+async def apply_progress(
+    session: AsyncSession, worker: Worker, report: ProgressReport
+) -> tuple[RangeChunk, bool]:
+    """Advance a chunk's checkpoint and record item results idempotently.
+
+    Returns ``(chunk, proceed)``. ``proceed`` is False when the job is no longer
+    running (paused/stopped): the batch just reported is still recorded — its
+    downloads are done and would otherwise be orphaned — and the chunk is handed
+    back to the queue with its checkpoint, so the agent stops and a resume continues
+    from here. Raises :class:`StaleLease` if ``worker`` does not hold the chunk.
+    """
     chunk = await session.get(RangeChunk, report.chunk_id)
     if chunk is None:
         raise LookupError(f"chunk {report.chunk_id} not found")
 
+    # Fencing: only the current lease holder may report on a chunk. A stale agent
+    # (lease expired, chunk reclaimed or re-leased) must not touch work it no longer owns.
+    if chunk.status != ChunkStatus.LEASED.value or chunk.leased_by != worker.id:
+        raise StaleLease(f"chunk {chunk.id} is not leased to worker {worker.id}")
+
     job = await session.get(Job, chunk.job_id)
     target_group_id = job.target_group_id if job else None
+    running = job is not None and job.state == JobState.RUNNING.value
 
     # Move the checkpoint forward only (never backwards).
     if chunk.next_id is None or report.next_id > chunk.next_id:
         chunk.next_id = report.next_id
-    # Progress counts as a heartbeat: renew the lease on a still-leased chunk.
-    if chunk.status == ChunkStatus.LEASED.value:
+    # Progress counts as a heartbeat: renew the lease while the job is running.
+    if running:
         chunk.lease_expires_at = _now() + timedelta(seconds=get_settings().default_lease_seconds)
     worker.last_heartbeat_at = _now()
 
@@ -375,8 +398,24 @@ async def apply_progress(session: AsyncSession, worker: Worker, report: Progress
             await _record_download(session, row, worker, item)
             if target_group_id is not None:
                 await _assign_group(session, row.id, target_group_id)
+
+    if not running:
+        chunk.status = ChunkStatus.PENDING.value
+        chunk.leased_by = None
+        chunk.lease_expires_at = None
+        log_event(
+            session,
+            component="scheduler",
+            operation="release",
+            result="job_not_running",
+            message=f"chunk {chunk.id} returned to the queue (job {chunk.job_id} is "
+                    f"{job.state if job else 'gone'}); resumes from {chunk.next_id}",
+            job_id=chunk.job_id,
+            worker_id=worker.id,
+            chunk_id=chunk.id,
+        )
     await session.flush()
-    return chunk
+    return chunk, running
 
 
 async def _assign_group(session: AsyncSession, item_id: int, group_id: int) -> None:
@@ -434,12 +473,23 @@ async def _record_download(
 
 
 async def complete_chunk(
-    session: AsyncSession, chunk_id: int, status: ChunkStatus
+    session: AsyncSession, chunk_id: int, status: ChunkStatus, worker_id: int | None = None
 ) -> RangeChunk:
-    """Mark a chunk done, or return it to the queue on failure for a retry."""
+    """Mark a chunk done, or return it to the queue on failure for a retry.
+
+    With ``worker_id`` the call is fenced: only the current lease holder may complete
+    or fail the chunk (:class:`StaleLease` otherwise). Completing an already-completed
+    chunk is an idempotent no-op, so a retried request is harmless.
+    """
     chunk = await session.get(RangeChunk, chunk_id)
     if chunk is None:
         raise LookupError(f"chunk {chunk_id} not found")
+
+    if worker_id is not None:
+        if status == ChunkStatus.COMPLETED and chunk.status == ChunkStatus.COMPLETED.value:
+            return chunk
+        if chunk.status != ChunkStatus.LEASED.value or chunk.leased_by != worker_id:
+            raise StaleLease(f"chunk {chunk_id} is not leased to worker {worker_id}")
 
     if status == ChunkStatus.COMPLETED:
         chunk.status = ChunkStatus.COMPLETED.value
@@ -516,8 +566,10 @@ async def requeue_failed_items(session: AsyncSession, job_id: int, limit: int = 
             chunk.attempt += 1
         item.status = ItemStatus.PENDING.value
 
-    # A finished job must go back to running, or nothing would be handed out.
-    if job.state != JobState.RUNNING.value:
+    # A *finished* job must go back to running, or nothing would be handed out. A
+    # paused/stopped job is left as the user set it: the retried work waits in the
+    # queue and runs when they resume it (retry must not silently un-pause a job).
+    if job.state in (JobState.COMPLETED.value, JobState.FAILED.value):
         job.state = JobState.RUNNING.value
 
     log_event(

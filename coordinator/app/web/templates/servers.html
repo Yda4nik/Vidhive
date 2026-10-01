@@ -115,7 +115,7 @@
       <input type="hidden" name="mode" id="del-mode" value="purge">
       <button type="button" class="choice" id="del-redist" onclick="chooseDelete('redistribute')">
         <b>Распределить по другим и удалить</b>
-        <span class="sub">Видео заново скачиваются на другой сервер, затем этот удаляется. Файлы этого сервера стираются.</span>
+        <span class="sub">Видео заново скачиваются на другие серверы. Этот сервер ничего не теряет и удалится сам, когда у каждого видео появится копия; если перенос не удастся — всё останется на месте.</span>
       </button>
       <button type="button" class="choice danger" onclick="chooseDelete('purge')">
         <b>Удалить вместе с данными</b>
@@ -188,8 +188,10 @@
     document.getElementById("del-note").textContent =
       "На сервере " + d.videos + " скачанных видео.";
     var rb = document.getElementById("del-redist");
-    rb.disabled = !CAN_REDISTRIBUTE;
-    rb.title = CAN_REDISTRIBUTE ? "" : "Нужен хотя бы ещё один сервер на связи";
+    var already = d.state === "draining";
+    rb.disabled = !CAN_REDISTRIBUTE || already;
+    rb.title = already ? "Этот сервер уже переносит свои видео"
+             : (CAN_REDISTRIBUTE ? "" : "Нужен хотя бы ещё один сервер на связи");
     document.getElementById("del-overlay").classList.add("open");
   }
   function closeDelete() {

@@ -147,13 +147,18 @@ class WorkerRunner:
                 *(self._handle_id(i, chunk.target_template) for i in ids)
             )
             try:
-                await self.client.progress(
+                proceed = await self.client.progress(
                     self.worker_id,
                     ProgressReport(chunk_id=chunk.chunk_id, next_id=batch_end, items=results),
                 )
             except Exception as exc:  # noqa: BLE001
+                # Includes 409 (lease lost: another agent owns the chunk now) — either
+                # way stop; the chunk returns to the queue and is handled elsewhere.
                 log.warning("progress report failed: %s", exc)
-                return  # lease will expire and the chunk returns to the queue
+                return
+            if proceed is False:      # explicit stop signal only
+                log.info("chunk %s: job paused/stopped — stopping after this batch", chunk.chunk_id)
+                return  # the coordinator already released the chunk with its checkpoint
             cur = batch_end
 
         if not self._stop.is_set():

@@ -35,7 +35,7 @@ from app.api.jobs import (
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
 from app.db.models import AgentDeployment, Invite, RoleModel, User, UserRole
-from app.services import deployer, deployments, youtube
+from app.services import deployer, deployments, drain, youtube
 from app.services.agent_client import agent_headers, file_url
 from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
 from app.services.security import hash_password, verify_password
@@ -267,6 +267,12 @@ async def _servers_context(session: AsyncSession) -> dict:
         if d is not None:
             deployed[w.id] = {"ssh_host": d.ssh_host, "ssh_port": d.ssh_port, "ssh_user": d.ssh_user}
 
+    # For a draining server: how many of its videos still have no copy elsewhere.
+    draining = {
+        w.id: len(await drain.unmigrated_items(session, w.id))
+        for w in workers if w.state == "draining"
+    }
+
     online = sum(1 for w in workers if w.state == "online")
     return {
         "workers": list(workers),
@@ -274,6 +280,7 @@ async def _servers_context(session: AsyncSession) -> dict:
         "videos": videos,
         "used_bytes": used_bytes,
         "deployed": deployed,
+        "draining": draining,
         # Redistribution needs at least one other online server to receive the work.
         "can_redistribute": online > 1,
     }

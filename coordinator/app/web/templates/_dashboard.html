@@ -30,7 +30,7 @@
         {% set m = metrics.get(w.id) %}
         <tr>
           <td>{{ w.name }}</td>
-          <td><span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span></td>
+          <td><span class="pill {{ 'ok' if w.state == 'online' else ('run' if w.state == 'draining' else 'bad') }}">{{ w.state }}</span></td>
           <td>{{ w.threads or "—" }}</td>
           <td>{{ (m.cpu_percent ~ "%") if m and m.cpu_percent is not none else "—" }}</td>
           <td>{{ ((m.ram_used_mb // 1024) ~ "/" ~ (m.ram_total_mb // 1024) ~ " ГБ") if m and m.ram_total_mb else "—" }}</td>

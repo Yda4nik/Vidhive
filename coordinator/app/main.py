@@ -22,7 +22,7 @@ from app.api import health, jobs, library, notes, workers
 from app.core.config import get_settings
 from app.db.models import Job
 from app.db.session import get_sessionmaker
-from app.services import scheduler
+from app.services import drain, scheduler
 from app.services.auth import AccessError, load_current_user
 from app.services.bus import bus
 from app.web.router import router as web_router
@@ -88,6 +88,10 @@ async def _completion_sweeper() -> None:
                 if await scheduler.mark_stale_workers(
                     session, get_settings().worker_offline_seconds
                 ):
+                    changed = True
+
+                # A draining server is removed once every video it holds has a copy elsewhere.
+                if await drain.finalize_drained_workers(session):
                     changed = True
 
                 # Bound the metrics table so its "latest per worker" query stays fast.

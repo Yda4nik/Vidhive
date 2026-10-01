@@ -47,11 +47,17 @@ class CoordinatorClient:
         )
         resp.raise_for_status()
 
-    async def progress(self, worker_id: int, report: ProgressReport) -> None:
+    async def progress(self, worker_id: int, report: ProgressReport) -> bool:
+        """Report a batch. Returns False if the agent should stop this chunk (the job
+        was paused/stopped). Raises on HTTP errors — a 409 means the lease was lost."""
         resp = await self._client.post(
             f"/api/workers/{worker_id}/progress", json=report.model_dump(mode="json")
         )
         resp.raise_for_status()
+        try:
+            return bool(resp.json().get("proceed", True))
+        except ValueError:      # an older coordinator answers {"ok": true} (no field)
+            return True
 
     async def complete(self, worker_id: int, chunk_id: int) -> None:
         resp = await self._client.post(

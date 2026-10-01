@@ -46,6 +46,9 @@ class WorkerState(str, Enum):
     ONLINE = "online"
     DEGRADED = "degraded"
     OFFLINE = "offline"
+    # Being emptied: gets no new work, keeps serving its files until every video it
+    # holds has a copy on another server, then the coordinator removes it.
+    DRAINING = "draining"
 
 
 class DownloadStatus(str, Enum):

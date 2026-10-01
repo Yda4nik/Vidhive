@@ -264,14 +264,17 @@ def test_delete_server_purges_its_videos(client, raw_sql):
     assert raw_sql("SELECT COUNT(*) FROM items WHERE status='completed'")[0][0] == 0
 
 
-def test_delete_server_redistribute_requeues_then_removes(client, raw_sql):
+def test_delete_server_redistribute_keeps_the_copy_until_it_is_moved(client, raw_sql):
+    """'Distribute' must not delete anything up front: the server drains, a re-download
+    is queued, and the old copy stays until a new one exists (see test_drain.py)."""
     wid = _complete_one(client, "agent-01", 5)
     client.post("/api/workers/register", json={"name": "agent-02"})  # a surviving online server
 
     assert client.request("DELETE", f"/api/workers/{wid}?mode=redistribute").status_code == 200
-    # The server is gone…
-    assert raw_sql("SELECT COUNT(*) FROM workers WHERE id=?", (wid,))[0][0] == 0
-    # …and a re-download job was queued so a surviving server fetches the video again.
+    # Not removed: draining, and its video is still in the catalogue.
+    assert raw_sql("SELECT state FROM workers WHERE id=?", (wid,))[0][0] == "draining"
+    assert raw_sql("SELECT COUNT(*) FROM items WHERE worker_id=? AND status='completed'", (wid,))[0][0] == 1
+    # A re-download job was queued so a surviving server fetches the video again.
     job = raw_sql("SELECT id FROM jobs WHERE name LIKE 'Перенос%'")
     assert len(job) == 1
     chunks = raw_sql(

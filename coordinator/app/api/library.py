@@ -19,7 +19,6 @@ from app.db.session import get_session
 from app.services.agent_client import agent_headers, file_url
 from app.services.auth import require_role
 from app.services.events import log_event
-from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import Ack, GroupCreate, GroupOut, LibraryAction
 
 log = logging.getLogger("vidhive.library")

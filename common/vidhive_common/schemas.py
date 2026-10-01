@@ -135,6 +135,13 @@ class Ack(BaseModel):
     ok: bool = True
 
 
+class ProgressAck(Ack):
+    """Reply to a progress report. ``proceed=False`` tells the agent to stop working on
+    this chunk (its job was paused/stopped); the batch just reported was recorded."""
+
+    proceed: bool = True
+
+
 # --------------------------------------------------------------------------- #
 # Read models for the API
 # --------------------------------------------------------------------------- #

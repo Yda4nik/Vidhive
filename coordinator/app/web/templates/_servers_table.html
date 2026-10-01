@@ -15,7 +15,13 @@
       {% set m = metrics.get(w.id) %}
       <tr>
         <td>{{ w.name }}</td>
-        <td><span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span></td>
+        <td>
+          {% if w.state == 'draining' %}
+            <span class="pill run" title="Его видео скачиваются на другие серверы; он удалится сам, когда у каждого видео появится копия">переносит · осталось {{ draining.get(w.id, 0) }}</span>
+          {% else %}
+            <span class="pill {{ 'ok' if w.state == 'online' else 'bad' }}">{{ w.state }}</span>
+          {% endif %}
+        </td>
         <td class="muted">{{ w.host or "—" }}</td>
         <td class="muted">{{ w.agent_version or "—" }}</td>
         <td>{{ w.threads or "—" }}</td>
@@ -29,7 +35,7 @@
         <td style="white-space:nowrap">
           <button class="del" title="Удалить сервер"
                   data-id="{{ w.id }}" data-name="{{ w.name }}" data-videos="{{ videos.get(w.id, 0) }}"
-                  onclick="openDelete(this)">🗑</button>
+                  data-state="{{ w.state }}" onclick="openDelete(this)">🗑</button>
           {% set dep = deployed.get(w.id) %}
           {% if dep %}
           <button class="del" title="Снести с машины по SSH"
