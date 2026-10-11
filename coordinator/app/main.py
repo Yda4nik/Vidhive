@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -177,6 +177,16 @@ def create_app() -> FastAPI:
     # Web UI
     static_dir = Path(__file__).resolve().parent / "web" / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
+
+    # Browsers ask for /favicon.ico on their own — including on the login page, before
+    # any session exists — so it must be public (it is only an image).
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        return FileResponse(
+            static_dir / "favicon.ico",
+            media_type="image/x-icon",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.include_router(web_router)
 

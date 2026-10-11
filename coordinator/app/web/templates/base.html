@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Vidhive{% endblock %}</title>
+  <link rel="icon" href="/favicon.ico?v=1" sizes="48x48">
+  <link rel="icon" type="image/png" href="/static/favicon-32.png?v=1" sizes="32x32">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+  <meta name="theme-color" content="#0f1420">
   <script>
     // Apply the saved theme before paint to avoid a flash.
     (function () {
@@ -22,9 +26,17 @@
             --accent:#3f63d6; --ok:#1f9d63; --bad:#d23b3b;
             --btn-bg:#eef1f7; --input-bg:#ffffff; --bar-bg:#e6eaf2; --on-accent:#ffffff; }
     * { box-sizing:border-box; }
+    /* Author rules like `.btn{display:inline-block}` / `.vh-overlay{display:flex}` beat the
+       browser's built-in [hidden]{display:none}, so a "hidden" element would still show
+       (and a hidden full-screen overlay would swallow every click). Make hidden final. */
+    [hidden] { display:none !important; }
     body { margin:0; font:15px/1.6 system-ui,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--txt); }
     header { padding:14px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:16px; }
-    .brand { flex:1; font-size:20px; font-weight:600; white-space:nowrap; }
+    .brand { flex:1; font-size:20px; font-weight:600; white-space:nowrap; display:flex;
+      align-items:center; gap:10px; color:inherit; text-decoration:none; }
+    .brand-logo { width:30px; height:30px; flex:0 0 auto; background:var(--accent);
+      -webkit-mask:url(/static/logo.png?v=1) center/contain no-repeat;
+              mask:url(/static/logo.png?v=1) center/contain no-repeat; }
     header nav { flex:2; display:flex; gap:22px; justify-content:center; flex-wrap:wrap; }
     header nav a { color:var(--muted); text-decoration:none; }
     header nav a:hover { color:var(--txt); }
@@ -82,7 +94,7 @@
 </head>
 <body>
   <header>
-    <span class="brand">🐝 Vidhive</span>
+    <a class="brand" href="/" aria-label="Vidhive — на главную"><span class="brand-logo" aria-hidden="true"></span>Vidhive</a>
     <nav>
       <a href="/">Панель</a>
       <a href="/jobs">Задания</a>
