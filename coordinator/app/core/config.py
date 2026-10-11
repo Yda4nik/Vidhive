@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # A worker silent for this long (agents heartbeat every ~5 s) is marked offline.
     worker_offline_seconds: int = 30
 
+    # Requests arriving through a tunnel / from a public address (see services/netinfo)
+    # may not open administrator pages or the first-run setup, and cannot see /docs.
+    # Turn off only if the app is never exposed beyond a network you fully trust.
+    restrict_public: bool = True
+
     log_level: str = "INFO"
 
     # Access control (all from env; empty admin/token = feature effectively off).

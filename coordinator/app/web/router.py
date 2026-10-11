@@ -35,9 +35,9 @@ from app.api.jobs import (
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
 from app.db.models import AgentDeployment, Invite, RoleModel, User, UserRole
-from app.services import deployer, deployments, drain, youtube
+from app.services import deployer, deployments, drain, netinfo, youtube
 from app.services.agent_client import agent_headers, file_url
-from app.services.auth import ROLE_RANK, require_role, role_of, seed_roles
+from app.services.auth import ROLE_RANK, AccessError, require_role, role_of, seed_roles
 from app.services.ratelimit import login_limiter
 from app.services.security import DUMMY_HASH, ahash_password, averify_password
 from app.core.config import get_settings
@@ -130,7 +130,19 @@ def _page(request: Request, name: str, ctx: dict, status_code: int = 200) -> HTM
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    # Behind a tunnel the TCP peer is the tunnel itself, so key the login throttle on
+    # the visitor address the tunnel forwards (see services/netinfo).
+    return netinfo.client_ip(request)
+
+
+def _deny_public_setup(request: Request) -> None:
+    """The first-run wizard makes whoever finishes it an administrator, so it must
+    never be completable by a stranger arriving through a public link."""
+    if get_settings().restrict_public and netinfo.is_public(request):
+        raise AccessError(
+            403, authenticated=False,
+            detail="Первоначальная настройка доступна только из домашней сети.",
+        )
 
 
 _SPEED_WINDOW_SECONDS = 60
@@ -502,6 +514,7 @@ async def _user_count(session: AsyncSession) -> int:
 @router.get("/setup", response_class=HTMLResponse)
 async def setup_page(request: Request, session: AsyncSession = Depends(get_session)):
     # First-run wizard: only available until the first user exists.
+    _deny_public_setup(request)
     if await _user_count(session) > 0:
         return RedirectResponse("/login", status_code=303)
     return _page(request, "setup.html", {"error": ""})
@@ -515,6 +528,7 @@ async def setup_submit(
     confirm: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ):
+    _deny_public_setup(request)
     if await _user_count(session) > 0:
         return RedirectResponse("/login", status_code=303)
     if not username.strip() or not password:

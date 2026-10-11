@@ -13,11 +13,17 @@ from starlette.requests import Request
 from app.core.config import get_settings
 from app.db.models import RoleModel, User, UserRole
 from app.db.session import get_sessionmaker
+from app.services import netinfo
 from app.services.security import hash_password
 
 log = logging.getLogger("vidhive.auth")
 
 ROLE_RANK = {"viewer": 1, "operator": 2, "administrator": 3}
+
+PUBLIC_DENIED = (
+    "Этот раздел доступен только из домашней сети (или по Tailscale), "
+    "а не через публичную ссылку."
+)
 
 
 async def seed_roles(session: AsyncSession) -> None:
@@ -63,9 +69,12 @@ async def role_of(session: AsyncSession, user_id: int) -> str | None:
 class AccessError(Exception):
     """Raised by role guards; the app's handler renders it per request type."""
 
-    def __init__(self, status_code: int, authenticated: bool = False) -> None:
+    def __init__(
+        self, status_code: int, authenticated: bool = False, detail: str | None = None
+    ) -> None:
         self.status_code = status_code
         self.authenticated = authenticated
+        self.detail = detail  # shown to the user instead of the generic message
 
 
 async def load_current_user(request: Request) -> None:
@@ -90,6 +99,14 @@ def require_role(min_role: str):
     minimum = ROLE_RANK[min_role]
 
     async def _dep(request: Request) -> User:
+        # Administrator functions (servers, SSH deploy, users) are for the home network
+        # only: a hijacked admin session on a public link must not be able to reach them.
+        if (
+            min_role == "administrator"
+            and get_settings().restrict_public
+            and netinfo.is_public(request)
+        ):
+            raise AccessError(403, authenticated=False, detail=PUBLIC_DENIED)
         user = getattr(request.state, "user", None)
         if user is None:
             raise AccessError(401, authenticated=False)

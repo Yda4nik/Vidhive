@@ -4,6 +4,7 @@ Serves both the REST API (/api/*, /health) and the server-rendered dashboard (/)
 """
 
 import asyncio
+import html
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,7 +23,7 @@ from app.api import health, jobs, library, notes, workers
 from app.core.config import get_settings, resolve_secret_key
 from app.db.models import Job
 from app.db.session import get_sessionmaker
-from app.services import drain, scheduler
+from app.services import drain, netinfo, scheduler
 from app.services.auth import AccessError, load_current_user
 from app.services.bus import bus
 from app.web.router import router as web_router
@@ -46,6 +47,38 @@ _CSP = (
     "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 )
 _CSP_EXEMPT = ("/docs", "/redoc", "/openapi.json")
+_DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+class SecureCookieMiddleware:
+    """Mark the session cookie ``Secure`` when the visitor used https.
+
+    The tunnel terminates TLS and talks plain http to us, so Starlette alone would
+    never set the flag; a static ``https_only=True`` would instead break login over
+    http on the home network. Deciding per request supports both.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or not netinfo.is_https(Request(scope)):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_secure(message) -> None:
+            if message["type"] == "http.response.start":
+                headers = []
+                for name, value in message.get("headers", []):
+                    if name.lower() == b"set-cookie" and not any(
+                        part.strip().lower() == b"secure" for part in value.split(b";")
+                    ):
+                        value = value + b"; Secure"
+                    headers.append((name, value))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_secure)
 
 
 def _add_security_headers(request: Request, response) -> None:
@@ -146,6 +179,13 @@ def create_app() -> FastAPI:
     # before SessionMiddleware so that (add_middleware stacks last-added
     # outermost) SessionMiddleware wraps it and request.session is available.
     async def _attach_user(request: Request, call_next):
+        # The API schema / Swagger UI is for the owner, not for the internet.
+        if (
+            request.url.path.startswith(_DOCS_PATHS)
+            and get_settings().restrict_public
+            and netinfo.is_public(request)
+        ):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
         await load_current_user(request)
         return await call_next(request)
 
@@ -157,15 +197,18 @@ def create_app() -> FastAPI:
             "process, so everyone is signed out on every restart. Set a long random value."
         )
     app.add_middleware(SessionMiddleware, secret_key=secret_key, same_site="lax")
+    # Outermost, so it sees the Set-Cookie header SessionMiddleware produces.
+    app.add_middleware(SecureCookieMiddleware)
 
     @app.exception_handler(AccessError)
     async def _access_error(request: Request, exc: AccessError):
         if request.url.path.startswith("/api"):
-            detail = "forbidden" if exc.status_code == 403 else "unauthorized"
+            detail = exc.detail or ("forbidden" if exc.status_code == 403 else "unauthorized")
             return JSONResponse({"detail": detail}, status_code=exc.status_code)
         if exc.status_code == 401:
             return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
-        return HTMLResponse("<h1>403 — недостаточно прав</h1>", status_code=403)
+        message = html.escape(exc.detail or "недостаточно прав")
+        return HTMLResponse(f"<h1>403 — {message}</h1>", status_code=403)
 
     # API
     app.include_router(health.router)
