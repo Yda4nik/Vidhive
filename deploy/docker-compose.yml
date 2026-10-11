@@ -54,7 +54,9 @@ services:
     profiles: ["tunnel"]
     image: cloudflare/cloudflared:2026.10.0
     restart: unless-stopped
-    command: tunnel --no-autoupdate --url http://coordinator:8000
+    # http2 (TCP) instead of the default QUIC (UDP): QUIC kept dropping on the home
+    # network ("no recent network activity") and Cloudflare answered 530.
+    command: tunnel --no-autoupdate --protocol http2 --url http://coordinator:8000
     depends_on:
       coordinator:
         condition: service_healthy
