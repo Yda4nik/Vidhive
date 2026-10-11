@@ -42,6 +42,24 @@ services:
       retries: 5
     networks: [vidhive]
 
+  # Optional public link: a Cloudflare "Quick Tunnel" (free, no account). It makes an
+  # outbound connection to Cloudflare and publishes the coordinator at a random
+  # https://<words>.trycloudflare.com address; the address CHANGES whenever this
+  # container is recreated. Requests that arrive through it are treated as public by
+  # the app (no admin pages, no /docs, no first-run setup — see VIDHIVE_RESTRICT_PUBLIC).
+  #   start :  docker compose --profile tunnel up -d tunnel
+  #   address: docker compose logs tunnel | grep trycloudflare.com
+  #   stop  :  docker compose --profile tunnel rm -sf tunnel
+  tunnel:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:2026.10.0
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://coordinator:8000
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    networks: [vidhive]
+
   # Controllable stand-in for the target service, for safe end-to-end runs
   # (spec sections 20 and 23). Returns 200+video / 404 / 403 / 429 / 500 by id.
   mock:
