@@ -82,7 +82,7 @@ from app.db.models import (
     WorkerMetric,
 )
 from app.db.session import get_session, get_sessionmaker
-from vidhive_common.enums import ItemStatus
+from vidhive_common.enums import ItemStatus, WorkerState
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -437,26 +437,58 @@ async def deploy_log_fragment(dep_id: str):
     return JSONResponse({"status": dep.status, "lines": dep.lines})
 
 
-async def _run_teardown(dep_id: str, params, worker_id: int, worker_name: str) -> None:
-    """Tear the agent down on the host; on success drop its DB rows too."""
+_COPY_POLL_SECONDS = 15
+
+
+async def _wait_for_copies(dep_id: str, worker_id: int) -> None:
+    """Block until every video on the server has a completed copy elsewhere."""
+    last = None
+    while True:
+        async with get_sessionmaker()() as session:
+            if await session.get(Worker, worker_id) is None:
+                return
+            left = len(await drain.unmigrated_items(session, worker_id))
+        if left == 0:
+            return
+        if left != last:
+            deployments.append(dep_id, f"Жду, пока видео скопируются на другие серверы: осталось {left}")
+            last = left
+        await asyncio.sleep(_COPY_POLL_SECONDS)
+
+
+async def _run_teardown(
+    dep_id: str, params, worker_id: int, worker_name: str, wait_for_copies: bool = False
+) -> None:
+    """Tear the agent down on the host; on success drop its DB rows (and files) too.
+
+    With ``wait_for_copies`` the wipe starts only after the server's videos have a copy
+    on other servers; if the wipe then fails the server is put back online, never lost.
+    """
     try:
+        if wait_for_copies:
+            await _wait_for_copies(dep_id, worker_id)
+            deployments.append(dep_id, "Видео скопированы. Сношу агента с машины…")
         code = await deployer.teardown(params, lambda line: deployments.append(dep_id, line))
         deployments.finish(dep_id, code == 0)
-        if code == 0:
-            async with get_sessionmaker()() as session:
+        async with get_sessionmaker()() as session:
+            worker = await session.get(Worker, worker_id)
+            if code == 0:
                 await session.execute(
                     AgentDeployment.__table__.delete().where(
                         AgentDeployment.worker_name == worker_name
                     )
                 )
-                worker = await session.get(Worker, worker_id)
                 if worker is not None:
-                    await session.delete(worker)
-                await session.commit()
-            deployments.append(dep_id, "Сервер удалён из системы.")
+                    await drain.purge_worker(session, worker, reason="teardown")
+                deployments.append(dep_id, "Сервер удалён из системы.")
+            elif worker is not None and worker.state == WorkerState.DRAINING.value:
+                worker.state = WorkerState.ONLINE.value  # copies exist; keep it visible
+            await session.commit()
     except Exception as exc:  # noqa: BLE001
         deployments.append(dep_id, f"ОШИБКА: {exc}")
         deployments.finish(dep_id, False)
+    finally:
+        drain.release(worker_id)
     bus.publish()
 
 
@@ -506,6 +538,89 @@ async def server_teardown(
     )
     dep = deployments.new_deployment("teardown", worker.name)
     asyncio.create_task(_run_teardown(dep.id, params, worker.id, worker.name))
+    return RedirectResponse(f"/servers/deploy/{dep.id}", status_code=303)
+
+
+@router.post("/servers/{worker_id}/remove",
+             dependencies=[Depends(require_role("administrator"))])
+async def server_remove(
+    worker_id: int,
+    videos: str = Form("transfer"),          # "transfer" to other servers | "delete" with the server
+    wipe: str = Form(""),                    # "1" = also remove the agent from the machine (SSH)
+    ssh_key: str = Form(""),
+    ssh_password: str = Form(""),
+    ssh_host: str = Form(""),
+    ssh_port: int = Form(22),
+    ssh_user: str = Form("root"),
+    session: AsyncSession = Depends(get_session),
+):
+    """The one way to remove a server: pick what happens to its videos and, for servers
+    installed over SSH, whether the agent is also wiped from the machine.
+    """
+    worker = await session.get(Worker, worker_id)
+    if worker is None:
+        return RedirectResponse("/servers?error=сервер+не+найден", status_code=303)
+    transfer = videos == "transfer"
+
+    if not wipe:
+        # Remove from the system only (the old trash-can behaviour).
+        try:
+            await delete_worker(worker_id, "redistribute" if transfer else "purge", session)
+        except HTTPException as exc:
+            return RedirectResponse(url=f"/servers?error={quote(str(exc.detail))}", status_code=303)
+        return RedirectResponse(url="/servers", status_code=303)
+
+    dep_row = (
+        await session.execute(
+            select(AgentDeployment).where(AgentDeployment.worker_name == worker.name)
+        )
+    ).scalars().first()
+    if dep_row is None:
+        return RedirectResponse("/servers?error=сервер+развёрнут+не+по+SSH", status_code=303)
+    if not (ssh_key.strip() or ssh_password):
+        return RedirectResponse("/servers?error=нужен+пароль+или+SSH-ключ", status_code=303)
+    if _storage_path_error(dep_row.storage_path):
+        return RedirectResponse(
+            "/servers?error=" + quote("небезопасный путь хранилища в записи сервера — снос отменён"),
+            status_code=303,
+        )
+    if transfer:
+        if worker.state == WorkerState.DRAINING.value:
+            return RedirectResponse("/servers?error=" + quote("сервер уже переносит свои видео"), status_code=303)
+        others = (
+            await session.execute(
+                select(func.count()).select_from(Worker)
+                .where(Worker.id != worker.id).where(Worker.state == WorkerState.ONLINE.value)
+            )
+        ).scalar_one()
+        if not others:
+            return RedirectResponse(
+                "/servers?error=" + quote("нет других серверов в сети для переноса видео"),
+                status_code=303,
+            )
+
+    params = deployer.DeployParams(
+        ssh_host=(ssh_host.strip() or dep_row.ssh_host),
+        ssh_port=ssh_port or dep_row.ssh_port,
+        ssh_user=(ssh_user.strip() or dep_row.ssh_user),
+        ssh_key=ssh_key,
+        ssh_password=ssh_password,
+        env={
+            "INSTALL_DIR": dep_row.install_dir,
+            "SERVICE_NAME": dep_row.service_name,
+            "VIDHIVE_STORAGE_PATH": dep_row.storage_path,
+        },
+    )
+    if transfer:
+        drain.hold(worker.id)  # the task below wipes the machine; the sweeper must not purge first
+        await drain.start_drain(session, worker)
+        await session.commit()
+    dep = deployments.new_deployment("teardown", worker.name)
+    if transfer:
+        deployments.append(dep.id, "Видео ставятся на перенос; машину снесу, когда копии будут готовы.")
+    asyncio.create_task(
+        _run_teardown(dep.id, params, worker.id, worker.name, wait_for_copies=transfer)
+    )
     return RedirectResponse(f"/servers/deploy/{dep.id}", status_code=303)
 
 
@@ -927,6 +1042,38 @@ async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_se
     return _page(request, "_jobs_table.html", {"rows": await _active_job_rows(session)})
 
 
+_ERRORS_SHOWN = 200
+
+
+async def _error_rows(session: AsyncSession) -> dict:
+    """Identifiers on the retry list (failed / rate-limited / waiting), newest first."""
+    statuses = ("failed", "rate_limited", "retry_wait")
+    rows = (
+        await session.execute(
+            select(Item, Job.name)
+            .join(Job, Job.id == Item.job_id)
+            .where(Item.status.in_(statuses))
+            .order_by(Item.updated_at.desc())
+            .limit(_ERRORS_SHOWN)
+        )
+    ).all()
+    return {
+        "errors": [
+            {"id": it.id, "job_id": it.job_id, "job_name": name, "external_id": it.external_id,
+             "status": it.status, "error": it.last_error or "", "attempts": it.attempts}
+            for it, name in rows
+        ],
+        "error_total": await _failed_item_count(session),
+        "errors_shown": _ERRORS_SHOWN,
+    }
+
+
+@router.get("/fragments/errors", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("viewer"))])
+async def errors_fragment(request: Request, session: AsyncSession = Depends(get_session)):
+    return _page(request, "_errors_table.html", await _error_rows(session))
+
+
 async def _all_jobs_brief(session: AsyncSession) -> list[dict]:
     jobs = (await session.execute(select(Job).order_by(Job.id.desc()))).scalars().all()
     return [{"id": j.id, "name": j.name} for j in jobs]
@@ -939,6 +1086,7 @@ async def jobs_page(request: Request, error: str = "", session: AsyncSession = D
     ).scalars().all()
     return _page(request, "jobs.html", {
         "rows": await _active_job_rows(session),
+        **await _error_rows(session),
         "failed_count": await _failed_item_count(session),
         "all_jobs": await _all_jobs_brief(session),
         "groups": [{"id": g.id, "name": g.name} for g in groups],

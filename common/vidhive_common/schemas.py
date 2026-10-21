@@ -74,6 +74,13 @@ class WorkerOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DownloadProgress(BaseModel):
+    """One video the agent is downloading right now."""
+    external_id: int
+    percent: float | None = None  # 0..100, None while the size is still unknown
+    title: str | None = None
+
+
 class Heartbeat(BaseModel):
     cpu_percent: float | None = None
     ram_used_mb: float | None = None
@@ -81,6 +88,8 @@ class Heartbeat(BaseModel):
     disk_free_gb: float | None = None
     active_checks: int = 0
     active_downloads: int = 0
+    # Live per-video progress, for the dashboard (not persisted).
+    downloads: list[DownloadProgress] = []
     # The chunk the agent is actively processing right now (renew only this one).
     active_chunk_id: int | None = None
 

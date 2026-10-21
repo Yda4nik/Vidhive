@@ -42,8 +42,42 @@ def _default_probe(url: str) -> dict | None:
         return ydl.extract_info(url, download=False)
 
 
+def stream_percent(d: dict) -> float | None:
+    """Percent done of one yt-dlp stream from a progress-hook dict (None if unknown)."""
+    if d.get("status") == "finished":
+        return 100.0
+    total = d.get("total_bytes") or d.get("total_bytes_estimate")
+    done = d.get("downloaded_bytes")
+    if total and done is not None:
+        return min(100.0, done * 100.0 / total)
+    count, index = d.get("fragment_count"), d.get("fragment_index")
+    if count and index is not None:
+        return min(100.0, index * 100.0 / count)
+    return None
+
+
+def make_progress_hook(report: Callable[[float | None], None]) -> Callable[[dict], None]:
+    """yt-dlp downloads video and audio as separate streams and merges them, each
+    streaming 0..100%. Average them (by file) so the overall number only moves forward."""
+    streams: dict[str, float] = {}
+
+    def hook(d: dict) -> None:
+        pct = stream_percent(d)
+        if pct is None:
+            report(None)
+            return
+        name = d.get("filename") or d.get("tmpfilename") or "stream"
+        streams[name] = max(streams.get(name, 0.0), pct)
+        info = d.get("info_dict") or {}
+        expected = max(1, len(info.get("requested_formats") or []))
+        report(min(100.0, sum(streams.values()) / max(expected, len(streams))))
+
+    return hook
+
+
 def _default_download(
-    url: str, out_template: str, fmt: str, concurrency: int
+    url: str, out_template: str, fmt: str, concurrency: int,
+    progress: Callable[[float | None], None] | None = None,
 ) -> tuple[str, dict]:
     from yt_dlp import YoutubeDL
 
@@ -60,6 +94,8 @@ def _default_download(
         "noplaylist": True,
         "quiet": True,
     }
+    if progress is not None:
+        opts["progress_hooks"] = [make_progress_hook(progress)]
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
         return ydl.prepare_filename(info), info
@@ -163,19 +199,32 @@ class Checker:
             mime_type=info.get("ext"),
         )
 
-    async def download(self, external_id: int, found: ItemResult) -> DownloadedFile:
-        """Phase 3: download best quality to `{storage}/{prefix}/{id}/`."""
+    async def download(
+        self,
+        external_id: int,
+        found: ItemResult,
+        on_progress: Callable[[float | None], None] | None = None,
+    ) -> DownloadedFile:
+        """Phase 3: download best quality to `{storage}/{prefix}/{id}/`.
+
+        ``on_progress`` gets the overall percent (0..100, or None while unknown); it
+        is called from the download thread.
+        """
         dest = target_dir(self.settings.storage_path, external_id)
         dest.mkdir(parents=True, exist_ok=True)
         out_template = str(dest / "video.%(ext)s")
         url = found.download_url or self._url(external_id)
 
+        extra = {}
+        if on_progress is not None and self._download is _default_download:
+            extra["progress"] = on_progress  # injected test doubles keep the 4-arg shape
         path, info = await asyncio.to_thread(
             self._download,
             url,
             out_template,
             self.settings.download_format,
             self.settings.fragment_concurrency,
+            **extra,
         )
 
         # After a merge the final file may differ from prepare_filename's guess;

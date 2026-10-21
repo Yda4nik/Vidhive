@@ -1,0 +1,37 @@
+{# Retry list: identifiers that ended in a transient error. Re-rendered live. #}
+<div id="errors-live">
+{% if errors %}
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px">
+    <span class="muted tiny">
+      Показано {{ errors|length }}{% if error_total > errors|length %} из {{ error_total }}{% endif %}.
+      «↻ Повторить ошибки» перезапускает всё из этого списка; убранное отсюда повторяться не будет.
+    </span>
+    {% if request.state.role in ('operator', 'administrator') %}
+    <span class="btn" onclick="dismissAllErrors()">Очистить список</span>
+    {% endif %}
+  </div>
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr><th>Задание</th><th>Идентификатор</th><th>Статус</th><th>Ошибка</th><th>Попыток</th><th></th></tr></thead>
+    <tbody>
+      {% for e in errors %}
+      <tr>
+        <td class="muted">#{{ e.job_id }} {{ e.job_name or "" }}</td>
+        <td>{{ e.external_id }}</td>
+        <td><span class="pill bad">{{ e.status }}</span></td>
+        <td class="muted">{{ e.error or "—" }}</td>
+        <td class="muted">{{ e.attempts }}</td>
+        <td>
+          {% if request.state.role in ('operator', 'administrator') %}
+          <button class="del" title="Убрать из списка" data-item="{{ e.id }}" onclick="dismissError(this)">✕</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% else %}
+  <p class="empty">Ошибок нет.</p>
+{% endif %}
+</div>

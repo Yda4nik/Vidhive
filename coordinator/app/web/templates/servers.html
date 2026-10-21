@@ -109,47 +109,45 @@
   })();
 </script>
 
-{# Delete dialog — kept outside #srv-table so a live refresh never closes it. #}
-<div class="overlay" id="del-overlay">
+{# One removal dialog — kept outside #srv-table so a live refresh never closes it. #}
+<style>
+  label.radio { display:flex; gap:8px; align-items:flex-start; margin:6px 0; font-size:14px; color:var(--txt); cursor:pointer; }
+  label.radio input { width:auto; margin-top:3px; }
+</style>
+<div class="overlay" id="rm-overlay">
   <div class="modal">
-    <h3>Удалить сервер «<span id="del-name"></span>»?</h3>
-    <p id="del-note"></p>
-    <form method="post" id="del-form">
-      <input type="hidden" name="mode" id="del-mode" value="purge">
-      <button type="button" class="choice" id="del-redist" onclick="chooseDelete('redistribute')">
-        <b>Распределить по другим и удалить</b>
-        <span class="sub">Видео заново скачиваются на другие серверы. Этот сервер ничего не теряет и удалится сам, когда у каждого видео появится копия; если перенос не удастся — всё останется на месте.</span>
-      </button>
-      <button type="button" class="choice danger" onclick="chooseDelete('purge')">
-        <b>Удалить вместе с данными</b>
-        <span class="sub">Сервер и все его скачанные файлы удаляются безвозвратно.</span>
-      </button>
-      <div style="text-align:right; margin-top:6px">
-        <span class="btn" onclick="closeDelete()">Отмена</span>
-      </div>
-    </form>
-  </div>
-</div>
+    <h3>Удалить сервер «<span id="rm-name"></span>»?</h3>
+    <p id="rm-note"></p>
+    <form method="post" id="rm-form">
+      <label>Что сделать с видео на нём</label>
+      <label class="radio"><input type="radio" name="videos" value="transfer" id="rm-transfer" checked>
+        Перенести на другие серверы <span class="muted tiny">— удалю сервер только когда у каждого видео будет копия</span></label>
+      <label class="radio"><input type="radio" name="videos" value="delete">
+        Удалить вместе с сервером <span class="muted tiny">— безвозвратно</span></label>
 
-<div class="overlay" id="td-overlay">
-  <div class="modal">
-    <h3>Снести «<span id="td-name"></span>» с машины?</h3>
-    <p>Остановит службу и удалит код, конфиг и хранилище на самом сервере. Введите SSH-ключ ещё раз — он не хранится.</p>
-    <form method="post" id="td-form">
-      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-end">
-        <div style="flex:2 1 160px"><label>SSH хост</label><input type="text" name="ssh_host" id="td-host"></div>
-        <div style="flex:0 1 80px"><label>Порт</label><input type="number" name="ssh_port" id="td-port"></div>
-        <div style="flex:1 1 120px"><label>Пользователь</label><input type="text" name="ssh_user" id="td-user"></div>
+      <div id="rm-ssh-box" hidden>
+        <label class="radio" style="margin-top:12px"><input type="checkbox" name="wipe" value="1" id="rm-wipe" checked>
+          Полностью удалить агента с самой машины (по SSH)</label>
+        <div id="rm-creds">
+          <p class="muted tiny">Остановит службу и удалит код, конфиг и хранилище на сервере. Данные для входа нужны ещё раз — они нигде не сохраняются.</p>
+          <div class="row" style="gap:10px; flex-wrap:wrap; align-items:flex-end">
+            <div style="flex:2 1 160px"><label>SSH хост</label><input type="text" name="ssh_host" id="rm-host"></div>
+            <div style="flex:0 1 80px"><label>Порт</label><input type="number" name="ssh_port" id="rm-port"></div>
+            <div style="flex:1 1 120px"><label>Пользователь</label><input type="text" name="ssh_user" id="rm-user"></div>
+          </div>
+          <label>Пароль SSH</label>
+          <input type="password" name="ssh_password" placeholder="пароль на сервере">
+          <label>…или приватный SSH-ключ (PEM)</label>
+          <textarea name="ssh_key" rows="3"
+            style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+            background:var(--input-bg); color:var(--txt); font:12px/1.4 monospace; resize:vertical"></textarea>
+        </div>
       </div>
-      <label>Пароль SSH</label>
-      <input type="password" name="ssh_password" placeholder="пароль на сервере">
-      <label>…или приватный SSH-ключ (PEM)</label>
-      <textarea name="ssh_key" rows="3"
-        style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line);
-        background:var(--input-bg); color:var(--txt); font:12px/1.4 monospace; resize:vertical"></textarea>
-      <div style="display:flex; justify-content:space-between; margin-top:12px">
-        <span class="btn" onclick="closeTeardown()">Отмена</span>
-        <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="Снести">
+      <p class="muted tiny" id="rm-nossh" hidden>Этот сервер запущен не из формы SSH (например, в Docker): из списка он удалится, но сам агент на машине останется — остановите его там вручную.</p>
+
+      <div style="display:flex; justify-content:space-between; margin-top:14px">
+        <span class="btn" onclick="closeRemove()">Отмена</span>
+        <input type="submit" class="btn" style="border-color:var(--bad); color:var(--bad)" value="Удалить">
       </div>
     </form>
   </div>
@@ -157,67 +155,50 @@
 
 <script>
   var CAN_REDISTRIBUTE = {{ 'true' if can_redistribute else 'false' }};
-  var delId = null;
 
   // Data arrives via data-* attributes (never interpolated into JS code), so a
   // hostile server name / host / user can't break out into script.
-  function openTeardown(btn) {
+  function syncRemove() {
+    var wipe = document.getElementById("rm-wipe");
+    document.getElementById("rm-creds").hidden = !(wipe.checked && !document.getElementById("rm-ssh-box").hidden);
+  }
+  function openRemove(btn) {
     var d = btn.dataset;
-    document.getElementById("td-name").textContent = d.name;
-    document.getElementById("td-host").value = d.host || "";
-    document.getElementById("td-port").value = d.port || 22;
-    document.getElementById("td-user").value = d.user || "root";
-    document.getElementById("td-form").action = "/servers/" + encodeURIComponent(d.id) + "/teardown";
-    document.getElementById("td-overlay").classList.add("open");
+    document.getElementById("rm-name").textContent = d.name;
+    document.getElementById("rm-note").textContent = "На сервере " + d.videos + " скачанных видео.";
+    document.getElementById("rm-form").action = "/servers/" + encodeURIComponent(d.id) + "/remove";
+    var tr = document.getElementById("rm-transfer");
+    var cannot = !CAN_REDISTRIBUTE || d.state === "draining";
+    tr.disabled = cannot;
+    tr.parentNode.title = d.state === "draining" ? "Этот сервер уже переносит свои видео"
+      : (CAN_REDISTRIBUTE ? "" : "Нужен хотя бы ещё один сервер на связи");
+    if (cannot) document.querySelector('#rm-form input[name=videos][value=delete]').checked = true;
+    else tr.checked = true;
+    var ssh = !!d.host;
+    document.getElementById("rm-ssh-box").hidden = !ssh;
+    document.getElementById("rm-nossh").hidden = ssh;
+    document.getElementById("rm-wipe").checked = ssh;
+    document.getElementById("rm-host").value = d.host || "";
+    document.getElementById("rm-port").value = d.port || 22;
+    document.getElementById("rm-user").value = d.user || "root";
+    syncRemove();
+    document.getElementById("rm-overlay").classList.add("open");
   }
-  function closeTeardown() {
-    document.getElementById("td-overlay").classList.remove("open");
+  function closeRemove() {
+    document.getElementById("rm-overlay").classList.remove("open");
   }
-  document.getElementById("td-overlay").addEventListener("click", function (e) {
-    if (e.target === this) closeTeardown();
+  document.getElementById("rm-wipe").addEventListener("change", syncRemove);
+  document.getElementById("rm-overlay").addEventListener("click", function (e) {
+    if (e.target === this) closeRemove();
   });
-  document.getElementById("td-form").addEventListener("submit", function (e) {
+  document.getElementById("rm-form").addEventListener("submit", function (e) {
     e.preventDefault();
     var f = this;
-    vhConfirm("Полностью снести агента с этой машины? Файлы и код будут удалены.").then(function (ok) {
-      if (ok) f.submit();
-    });
-  });
-
-  function openDelete(btn) {
-    var d = btn.dataset;
-    delId = d.id;
-    document.getElementById("del-name").textContent = d.name;
-    document.getElementById("del-note").textContent =
-      "На сервере " + d.videos + " скачанных видео.";
-    var rb = document.getElementById("del-redist");
-    var already = d.state === "draining";
-    rb.disabled = !CAN_REDISTRIBUTE || already;
-    rb.title = already ? "Этот сервер уже переносит свои видео"
-             : (CAN_REDISTRIBUTE ? "" : "Нужен хотя бы ещё один сервер на связи");
-    document.getElementById("del-overlay").classList.add("open");
-  }
-  function closeDelete() {
-    document.getElementById("del-overlay").classList.remove("open");
-    delId = null;
-  }
-  function chooseDelete(mode) {
-    if (delId === null) return;
-    var human = mode === "redistribute"
-      ? "Распределить видео по другим серверам и удалить этот сервер?"
-      : "Удалить сервер вместе со всеми его файлами? Это необратимо.";
-    var id = delId;
-    vhConfirm(human).then(function (ok) {
-      if (!ok) return;
-      var form = document.getElementById("del-form");
-      form.action = "/servers/" + id + "/delete";
-      document.getElementById("del-mode").value = mode;
-      form.submit();
-    });
-  }
-  // Click on the dim backdrop closes the dialog.
-  document.getElementById("del-overlay").addEventListener("click", function (e) {
-    if (e.target === this) closeDelete();
+    var del = f.querySelector("input[name=videos]:checked").value === "delete";
+    var wipe = document.getElementById("rm-wipe").checked && !document.getElementById("rm-ssh-box").hidden;
+    var msg = (del ? "Видео будут удалены безвозвратно. " : "Видео будут перенесены на другие серверы. ")
+      + (wipe ? "Агент будет удалён с машины. " : "Агент на машине останется. ") + "Продолжить?";
+    vhConfirm(msg).then(function (ok) { if (ok) f.submit(); });
   });
 
   // Live refresh: swap the table on a real-time event; the dialog stays put.

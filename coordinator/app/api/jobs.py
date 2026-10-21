@@ -153,6 +153,39 @@ async def retry_failed(job_id: int, session: AsyncSession = Depends(get_session)
     return {"requeued": requeued}
 
 
+_ERROR_STATUSES = (
+    ItemStatus.FAILED.value,
+    ItemStatus.RETRY_WAIT.value,
+    ItemStatus.RATE_LIMITED.value,
+)
+
+
+@router.post("/errors/{item_id}/dismiss", dependencies=[Depends(require_role("operator"))])
+async def dismiss_error(item_id: int, session: AsyncSession = Depends(get_session)) -> dict:
+    """Take one failed identifier off the retry list (it stays counted as processed)."""
+    item = await session.get(Item, item_id)
+    if item is None or item.status not in _ERROR_STATUSES:
+        raise HTTPException(status_code=404, detail="ошибка не найдена")
+    item.status = ItemStatus.CANCELLED.value
+    await session.commit()
+    return {"dismissed": 1}
+
+
+@router.post("/errors/dismiss-all", dependencies=[Depends(require_role("operator"))])
+async def dismiss_all_errors(
+    job_id: int | None = Query(None), session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Clear the whole retry list, or just one job's part of it."""
+    stmt = select(Item).where(Item.status.in_(_ERROR_STATUSES))
+    if job_id is not None:
+        stmt = stmt.where(Item.job_id == job_id)
+    items = (await session.execute(stmt)).scalars().all()
+    for item in items:
+        item.status = ItemStatus.CANCELLED.value
+    await session.commit()
+    return {"dismissed": len(items)}
+
+
 @router.post("/retry-all", dependencies=[Depends(require_role("operator"))])
 async def retry_all(session: AsyncSession = Depends(get_session)) -> dict:
     """Re-queue failed identifiers across every job."""

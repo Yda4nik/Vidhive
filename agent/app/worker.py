@@ -16,6 +16,7 @@ from app.core.config import Settings
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import (
     ChunkLease,
+    DownloadProgress,
     Heartbeat,
     ItemResult,
     ProgressReport,
@@ -36,6 +37,8 @@ class WorkerRunner:
         self._active_checks = 0
         self._active_downloads = 0
         self._active_chunk_id: int | None = None
+        # external_id -> (title, percent) for downloads in flight; shown on the dashboard.
+        self._progress: dict[int, tuple[str | None, float | None]] = {}
 
     # -- lifecycle ---------------------------------------------------------- #
     async def register(self) -> int:
@@ -97,6 +100,13 @@ class WorkerRunner:
             active_checks=self._active_checks,
             active_downloads=self._active_downloads,
             active_chunk_id=self._active_chunk_id,
+            downloads=[
+                DownloadProgress(
+                    external_id=i, title=title,
+                    percent=round(pct, 1) if pct is not None else None,
+                )
+                for i, (title, pct) in list(self._progress.items())
+            ],
         )
         try:
             import os
@@ -178,8 +188,13 @@ class WorkerRunner:
 
             if result.status == ItemStatus.FOUND and self.settings.enable_download:
                 self._active_downloads += 1
+                self._progress[external_id] = (result.title, None)
+
+                def report(pct, _id=external_id, _title=result.title):
+                    self._progress[_id] = (_title, pct)
+
                 try:
-                    file = await self.checker.download(external_id, result)
+                    file = await self.checker.download(external_id, result, on_progress=report)
                     result.status = ItemStatus.COMPLETED
                     result.size_bytes = file.size_bytes or result.size_bytes
                     result.mime_type = file.mime_type or result.mime_type
@@ -189,6 +204,7 @@ class WorkerRunner:
                     result.error = str(exc)[:200]
                 finally:
                     self._active_downloads -= 1
+                    self._progress.pop(external_id, None)
             return result
 
     async def _sleep(self, seconds: float) -> None:

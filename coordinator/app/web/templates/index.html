@@ -8,11 +8,52 @@
 </div>
 
 <script>
+  // Per-agent download progress. Agents report it with each heartbeat (every ~5 s),
+  // which does not trigger the live refresh, so this polls its own small endpoint.
+  var lastActivity = {};
+  function paintActivity() {
+    document.querySelectorAll("td.act").forEach(function (td) {
+      var list = lastActivity[td.dataset.act] || [];
+      td.textContent = "";
+      if (!list.length) {
+        var dash = document.createElement("span");
+        dash.className = "muted";
+        dash.textContent = "—";
+        td.appendChild(dash);
+        return;
+      }
+      list.forEach(function (d) {
+        var line = document.createElement("div");
+        line.style.marginBottom = "4px";
+        var label = document.createElement("span");
+        label.className = "muted tiny";
+        var pct = d.percent === null || d.percent === undefined ? null : d.percent;
+        label.textContent = (d.title ? d.title + " · " : "ID " + d.external_id + " · ") +
+          (pct === null ? "…" : pct.toFixed(0) + "%");
+        var bar = document.createElement("div");
+        bar.className = "bar";
+        var fill = document.createElement("span");
+        fill.style.width = (pct === null ? 0 : pct) + "%";
+        bar.appendChild(fill);
+        line.appendChild(label);
+        line.appendChild(bar);
+        td.appendChild(line);
+      });
+    });
+  }
+  function pollActivity() {
+    fetch("/api/workers/activity")
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (data) { lastActivity = data; paintActivity(); })
+      .catch(function () {});
+  }
   window.liveRefresh = function () {
     fetch("/fragments/dashboard")
       .then(function (r) { return r.text(); })
-      .then(function (h) { document.getElementById("dash").innerHTML = h; });
+      .then(function (h) { document.getElementById("dash").innerHTML = h; paintActivity(); });
   };
+  pollActivity();
+  setInterval(pollActivity, 2500);
 </script>
 
 {% endblock %}

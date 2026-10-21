@@ -33,16 +33,12 @@
         <td class="muted" title="{{ w.storage_path or '' }}">{{ w.storage_path or "—" }}</td>
         <td class="muted">{{ w.last_heartbeat_at.strftime("%Y-%m-%d %H:%M") if w.last_heartbeat_at else "—" }}</td>
         <td style="white-space:nowrap">
+          {% set dep = deployed.get(w.id) %}
           <button class="del" title="Удалить сервер"
                   data-id="{{ w.id }}" data-name="{{ w.name }}" data-videos="{{ videos.get(w.id, 0) }}"
-                  data-state="{{ w.state }}" onclick="openDelete(this)">🗑</button>
-          {% set dep = deployed.get(w.id) %}
-          {% if dep %}
-          <button class="del" title="Снести с машины по SSH"
-                  data-id="{{ w.id }}" data-name="{{ w.name }}" data-host="{{ dep.ssh_host }}"
-                  data-port="{{ dep.ssh_port }}" data-user="{{ dep.ssh_user }}"
-                  onclick="openTeardown(this)">🧨</button>
-          {% endif %}
+                  data-state="{{ w.state }}"
+                  {% if dep %}data-host="{{ dep.ssh_host }}" data-port="{{ dep.ssh_port }}" data-user="{{ dep.ssh_user }}"{% endif %}
+                  onclick="openRemove(this)">🗑</button>
         </td>
       </tr>
       {% endfor %}

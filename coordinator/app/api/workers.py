@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.sources import template_for
 from app.db.models import Job, Worker, WorkerMetric
 from app.db.session import get_session
-from app.services import drain, scheduler
+from app.services import activity, drain, scheduler
 from app.services.agent_client import validate_agent_url
 from app.services.auth import require_agent_token, require_role
 from app.services.bus import bus
@@ -87,6 +87,12 @@ async def register_worker(
 async def list_workers(session: AsyncSession = Depends(get_session)) -> list[Worker]:
     result = await session.execute(select(Worker).order_by(Worker.name))
     return list(result.scalars().all())
+
+
+@router.get("/activity", dependencies=[Depends(require_role("viewer"))])
+async def workers_activity() -> dict[str, list[dict]]:
+    """What each agent is downloading right now, with progress (polled by the dashboard)."""
+    return {str(wid): downloads for wid, downloads in activity.snapshot().items()}
 
 
 @router.get("/{worker_id}", response_model=WorkerOut,
@@ -170,6 +176,7 @@ async def heartbeat(
             )
         )
     await session.commit()
+    activity.record(worker.id, payload.downloads)
     if came_back:
         bus.publish()  # heartbeats are not published by the middleware; a recovery must be
     return Ack()

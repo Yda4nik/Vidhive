@@ -80,6 +80,13 @@
   </div>
 </div>
 
+<div class="card">
+  <h2>Ошибки{% if error_total %} ({{ error_total }}){% endif %}</h2>
+  <div id="errors-box">
+    {% include "_errors_table.html" %}
+  </div>
+</div>
+
 <script>
   var SUPPORTED = { auto: ["link"], kinescope: ["id", "range", "link"], mock: ["id", "range"], youtube: ["link"] };
 
@@ -151,11 +158,26 @@
     });
   }
 
-  // ---- live refresh of the jobs table ----
+  function dismissError(btn) {
+    fetch("/api/jobs/errors/" + encodeURIComponent(btn.dataset.item) + "/dismiss", { method: "POST" })
+      .then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); else window.liveRefresh(); });
+  }
+  function dismissAllErrors() {
+    vhConfirm("Очистить весь список ошибок? Они больше не будут повторяться.").then(function (ok) {
+      if (!ok) return;
+      fetch("/api/jobs/errors/dismiss-all", { method: "POST" })
+        .then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); else window.liveRefresh(); });
+    });
+  }
+
+  // ---- live refresh of the jobs table and the error list ----
   window.liveRefresh = function () {
     fetch("/fragments/jobs")
       .then(function (r) { return r.text(); })
       .then(function (h) { document.getElementById("jobs-live").innerHTML = h; });
+    fetch("/fragments/errors")
+      .then(function (r) { return r.text(); })
+      .then(function (h) { document.getElementById("errors-box").innerHTML = h; });
   };
 </script>
 {% endblock %}

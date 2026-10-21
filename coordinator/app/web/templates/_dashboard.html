@@ -23,7 +23,7 @@
   {% if workers %}
     <table>
       <thead>
-        <tr><th>Имя</th><th>Состояние</th><th>Потоки</th><th>CPU</th><th>RAM</th><th>Диск своб.</th><th>Проверок</th><th>Загрузок</th></tr>
+        <tr><th>Имя</th><th>Состояние</th><th>Потоки</th><th>CPU</th><th>RAM</th><th>Диск своб.</th><th>Проверок</th><th>Загрузок</th><th>Сейчас скачивает</th></tr>
       </thead>
       <tbody>
         {% for w in workers %}
@@ -37,6 +37,7 @@
           <td>{{ (m.disk_free_gb ~ " ГБ") if m and m.disk_free_gb is not none else "—" }}</td>
           <td>{{ m.active_checks if m and m.active_checks is not none else "—" }}</td>
           <td>{{ m.active_downloads if m and m.active_downloads is not none else "—" }}</td>
+          <td class="act" data-act="{{ w.id }}" style="min-width:200px"><span class="muted">—</span></td>
         </tr>
         {% endfor %}
       </tbody>

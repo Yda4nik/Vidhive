@@ -157,6 +157,20 @@ async def start_drain(session: AsyncSession, worker: Worker) -> int:
     return len(videos)
 
 
+# Servers whose removal is driven by a background task that still has to wipe the
+# machine over SSH once the videos are copied (the credentials live only in that
+# task's memory). The sweeper must not purge them first.
+_HELD: set[int] = set()
+
+
+def hold(worker_id: int) -> None:
+    _HELD.add(worker_id)
+
+
+def release(worker_id: int) -> None:
+    _HELD.discard(worker_id)
+
+
 async def finalize_drained_workers(session: AsyncSession) -> int:
     """Remove every draining server whose videos all have a copy elsewhere."""
     draining = (
@@ -164,6 +178,8 @@ async def finalize_drained_workers(session: AsyncSession) -> int:
     ).scalars().all()
     done = 0
     for worker in draining:
+        if worker.id in _HELD:
+            continue  # a teardown task owns this one
         if await unmigrated_items(session, worker.id):
             continue  # still waiting for some re-download to finish
         await purge_worker(session, worker, reason="drained")

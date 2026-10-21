@@ -23,7 +23,7 @@ class FakeChecker:
             download_url="u",
         )
 
-    async def download(self, external_id, found):
+    async def download(self, external_id, found, on_progress=None):
         self.downloaded.append(external_id)
         return DownloadedFile(path=f"/x/{external_id}", size_bytes=10, mime_type="mp4")
 
