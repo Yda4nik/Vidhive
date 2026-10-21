@@ -30,6 +30,8 @@ services:
       VIDHIVE_ADMIN_USER: ${VIDHIVE_ADMIN_USER:-}
       VIDHIVE_ADMIN_PASSWORD: ${VIDHIVE_ADMIN_PASSWORD:-}
       VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
+      # true = admin pages/setup/docs are closed to requests that come through a tunnel.
+      VIDHIVE_RESTRICT_PUBLIC: ${VIDHIVE_RESTRICT_PUBLIC:-true}
     depends_on:
       postgres:
         condition: service_healthy
