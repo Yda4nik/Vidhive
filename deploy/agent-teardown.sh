@@ -54,10 +54,37 @@ else
   $SUDO pkill -F "${INSTALL_DIR}/agent.pid" 2>/dev/null || true
 fi
 
+# Whatever started it (systemd, nohup, a missing pkill), make sure nothing from the
+# install dir is still running: scan /proc for processes whose command line points
+# into it. Runs for both modes; needs no extra tools.
+step "Making sure no agent process is left..."
+for _d in /proc/[0-9]*; do
+  _pid="${_d#/proc/}"
+  [ "$_pid" = "$$" ] || [ "$_pid" = "$PPID" ] && continue
+  if $SUDO tr '\0' ' ' < "$_d/cmdline" 2>/dev/null | grep -qF -- "${INSTALL_DIR}/"; then
+    $SUDO kill "$_pid" 2>/dev/null || true
+  fi
+done
+sleep 1
+for _d in /proc/[0-9]*; do
+  _pid="${_d#/proc/}"
+  [ "$_pid" = "$$" ] || [ "$_pid" = "$PPID" ] && continue
+  if $SUDO tr '\0' ' ' < "$_d/cmdline" 2>/dev/null | grep -qF -- "${INSTALL_DIR}/"; then
+    $SUDO kill -9 "$_pid" 2>/dev/null || true
+  fi
+done
+
 step "Removing code (${INSTALL_DIR}), config (${ENV_FILE}) and storage (${STORAGE_PATH})..."
 $SUDO rm -rf "${INSTALL_DIR}"
 $SUDO rm -f "${ENV_FILE}"
 $SUDO rm -rf "${STORAGE_PATH}"
+# Also drop the (now empty) parent when it is the vidhive-named directory that
+# bootstrap created for the storage, e.g. /var/lib/vidhive. rmdir never removes a
+# directory that still has content.
+_parent="$(dirname "${STORAGE_PATH}")"
+case "$(basename "${_parent}")" in
+  vidhive*) $SUDO rmdir "${_parent}" 2>/dev/null || true ;;
+esac
 $SUDO rm -f /var/log/vidhive-agent.log 2>/dev/null || true
 
 step "Done. The host is clean of the Vidhive agent (system packages left intact)."
