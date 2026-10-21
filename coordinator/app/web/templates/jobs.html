@@ -9,6 +9,15 @@
   .srcbtn.disabled { opacity:.5; cursor:not-allowed; }
   .del { background:none; border:none; cursor:pointer; font-size:20px; color:var(--bad); padding:2px 8px; border-radius:8px; }
   .del:hover { background:rgba(224,90,90,.12); }
+  .dd { position:relative; }
+  .dd-list { position:absolute; right:0; top:100%; z-index:20; min-width:260px; margin-top:6px;
+    background:var(--input-bg); border:1px solid var(--line); border-radius:10px; padding:4px; box-shadow:0 8px 24px rgba(0,0,0,.35); }
+  .dd-list[hidden] { display:none; }
+  .dd-row { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; cursor:pointer; }
+  .dd-row:hover { background:var(--btn-bg); }
+  .dd-name { flex:1; }
+  .dd-x { background:none; border:none; cursor:pointer; color:var(--bad); font-size:16px; padding:0 6px; border-radius:6px; }
+  .dd-x:hover { background:rgba(224,90,90,.15); }
   #inputs .in-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
   #inputs .in-row input[type=text] { flex:1; }
   #inputs .in-row input.rf { flex:0 0 130px; }
@@ -49,6 +58,12 @@
     <label>Название (необязательно)</label>
     <input type="text" name="name" placeholder="например, вебинары по матанализу">
 
+    <label>Кому дать задание</label>
+    <select name="worker_id">
+      <option value="">Любому агенту (общая очередь)</option>
+      {% for w in workers %}<option value="{{ w.id }}">только {{ w.name }}</option>{% endfor %}
+    </select>
+
     <label>Папка</label>
     <select name="group_id">
       <option value="">Все</option>
@@ -67,23 +82,29 @@
     <h2 style="margin:0">Активные задания</h2>
     {% if request.state.role in ('operator', 'administrator') %}
     <div class="row" style="gap:8px; padding-bottom:7px; border-bottom:2px solid var(--accent)">
-      <select id="retry-scope" style="width:auto; max-width:220px">
-        <option value="all">Все задания</option>
-        {% for j in all_jobs %}<option value="{{ j.id }}">#{{ j.id }} {{ j.name or '' }}</option>{% endfor %}
-      </select>
+      <div class="dd" id="retry-dd">
+        <span class="btn dd-btn" onclick="toggleRetryList()"><span id="retry-label">Все задания</span> ▾</span>
+        <div class="dd-list" id="retry-list" hidden>
+          <div class="dd-row" data-scope="all" onclick="pickScope(this)">
+            <span class="dd-name">Все задания</span>
+            {% if failed_count %}<span class="muted tiny">{{ failed_count }}</span>{% endif %}
+          </div>
+          {% for j in error_jobs %}
+          <div class="dd-row" data-scope="{{ j.id }}" data-name="#{{ j.id }} {{ j.name or '' }}" onclick="pickScope(this)">
+            <span class="dd-name">#{{ j.id }} {{ j.name or '' }}</span>
+            <span class="muted tiny">{{ j.count }}</span>
+            <button type="button" class="dd-x" title="Убрать ошибки этого задания из списка"
+                    data-job="{{ j.id }}" onclick="event.stopPropagation(); dismissJobErrors(this)">✕</button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
       <span class="btn" onclick="retryErrors()" style="white-space:nowrap">↻ Повторить ошибки{% if failed_count %} ({{ failed_count }}){% endif %}</span>
     </div>
     {% endif %}
   </div>
   <div id="jobs-live">
     {% include "_jobs_table.html" %}
-  </div>
-</div>
-
-<div class="card">
-  <h2>Ошибки{% if error_total %} ({{ error_total }}){% endif %}</h2>
-  <div id="errors-box">
-    {% include "_errors_table.html" %}
   </div>
 </div>
 
@@ -146,8 +167,30 @@
   refreshModes();
 
   // ---- active-jobs controls (defined here so they survive live refreshes) ----
+  var retryScope = "all";
+  function toggleRetryList() {
+    var l = document.getElementById("retry-list");
+    l.hidden = !l.hidden;
+  }
+  function pickScope(row) {
+    retryScope = row.dataset.scope;
+    document.getElementById("retry-label").textContent = row.dataset.name || "Все задания";
+    document.getElementById("retry-list").hidden = true;
+  }
+  function dismissJobErrors(btn) {
+    var id = btn.dataset.job;
+    vhConfirm("Убрать ошибки задания #" + id + " из списка? Они больше не будут повторяться.").then(function (ok) {
+      if (!ok) return;
+      fetch("/api/jobs/errors/dismiss-all?job_id=" + encodeURIComponent(id), { method: "POST" })
+        .then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); else location.reload(); });
+    });
+  }
+  document.addEventListener("click", function (e) {
+    var dd = document.getElementById("retry-dd");
+    if (dd && !dd.contains(e.target)) document.getElementById("retry-list").hidden = true;
+  });
   function retryErrors() {
-    var scope = document.getElementById("retry-scope").value;
+    var scope = retryScope;
     var url = scope === "all" ? "/api/jobs/retry-all" : "/api/jobs/" + scope + "/retry";
     fetch(url, { method: "POST" }).then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); });
   }
@@ -158,26 +201,11 @@
     });
   }
 
-  function dismissError(btn) {
-    fetch("/api/jobs/errors/" + encodeURIComponent(btn.dataset.item) + "/dismiss", { method: "POST" })
-      .then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); else window.liveRefresh(); });
-  }
-  function dismissAllErrors() {
-    vhConfirm("Очистить весь список ошибок? Они больше не будут повторяться.").then(function (ok) {
-      if (!ok) return;
-      fetch("/api/jobs/errors/dismiss-all", { method: "POST" })
-        .then(function (r) { if (!r.ok) vhAlert("Ошибка: " + r.status); else window.liveRefresh(); });
-    });
-  }
-
-  // ---- live refresh of the jobs table and the error list ----
+  // ---- live refresh of the jobs table ----
   window.liveRefresh = function () {
     fetch("/fragments/jobs")
       .then(function (r) { return r.text(); })
       .then(function (h) { document.getElementById("jobs-live").innerHTML = h; });
-    fetch("/fragments/errors")
-      .then(function (r) { return r.text(); })
-      .then(function (h) { document.getElementById("errors-box").innerHTML = h; });
   };
 </script>
 {% endblock %}

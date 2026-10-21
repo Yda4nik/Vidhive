@@ -72,8 +72,12 @@ async def create_job(payload: JobCreate, session: AsyncSession = Depends(get_ses
     if range_end is not None and range_end < range_start:
         raise HTTPException(status_code=422, detail="range_end must be >= range_start")
 
+    if payload.worker_id is not None and await session.get(Worker, payload.worker_id) is None:
+        raise HTTPException(status_code=422, detail="agent not found")
+
     job = Job(
         name=payload.name,
+        assigned_worker_id=payload.worker_id,
         range_start=range_start,
         range_end=range_end,
         chunk_size=payload.chunk_size,

@@ -183,6 +183,11 @@ class Job(Base):
     source: Mapped[str] = mapped_column(String(20), default="kinescope", nullable=False)
     # Optional library group new videos are filed into automatically.
     target_group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"))
+    # Personal job: only this agent may take its chunks (NULL = any agent). If the agent
+    # is deleted the job falls back to "any agent" rather than getting stuck.
+    assigned_worker_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workers.id", ondelete="SET NULL")
+    )
     state: Mapped[str] = mapped_column(String(20), default="created", nullable=False)
     chunk_size: Mapped[int] = mapped_column(Integer, default=5000, nullable=False)
     request_timeout_seconds: Mapped[int] = mapped_column(Integer, default=20, nullable=False)

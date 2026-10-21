@@ -208,13 +208,19 @@ async def _worker_has_space(session: AsyncSession, worker: Worker) -> bool:
     return metric.disk_free_gb >= get_settings().min_free_space_gb
 
 
-async def _take_pending_chunk(session: AsyncSession) -> RangeChunk | None:
+def _eligible(worker: Worker):
+    """A personal job (assigned_worker_id set) belongs to that agent alone."""
+    return or_(Job.assigned_worker_id.is_(None), Job.assigned_worker_id == worker.id)
+
+
+async def _take_pending_chunk(session: AsyncSession, worker: Worker) -> RangeChunk | None:
     """Atomically claim one pending chunk of a running job (skip locked rows)."""
     stmt = (
         select(RangeChunk)
         .join(RangeChunk.job)
         .where(RangeChunk.status == ChunkStatus.PENDING.value)
         .where(Job.state == JobState.RUNNING.value)
+        .where(_eligible(worker))
         .order_by(RangeChunk.id)
         .limit(1)
         .with_for_update(skip_locked=True, of=RangeChunk)
@@ -222,11 +228,12 @@ async def _take_pending_chunk(session: AsyncSession) -> RangeChunk | None:
     return (await session.execute(stmt)).scalars().first()
 
 
-async def _generate_chunk(session: AsyncSession) -> RangeChunk | None:
+async def _generate_chunk(session: AsyncSession, worker: Worker) -> RangeChunk | None:
     """Cut a fresh chunk from a running job that still has range left."""
     stmt = (
         select(Job)
         .where(Job.state == JobState.RUNNING.value)
+        .where(_eligible(worker))
         .where(Job.next_chunk_start.is_not(None))
         .where(or_(Job.range_end.is_(None), Job.next_chunk_start <= Job.range_end))
         .order_by(Job.id)
@@ -275,9 +282,9 @@ async def lease_chunk(
         )
         return None
 
-    chunk = await _take_pending_chunk(session)
+    chunk = await _take_pending_chunk(session, worker)
     if chunk is None:
-        chunk = await _generate_chunk(session)
+        chunk = await _generate_chunk(session, worker)
     if chunk is None:
         return None
 

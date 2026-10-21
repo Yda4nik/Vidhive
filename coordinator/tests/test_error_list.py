@@ -12,10 +12,10 @@ def _seed(client, raw_sql, n=2):
     return jid
 
 
-def test_errors_fragment_lists_failed_items(client, raw_sql):
-    _seed(client, raw_sql)
-    r = client.get("/fragments/errors")
-    assert r.status_code == 200 and "boom" in r.text and "100" in r.text
+def test_jobs_page_lists_only_jobs_with_errors_with_a_cross(client, raw_sql):
+    jid = _seed(client, raw_sql)
+    html = client.get("/jobs").text
+    assert f'data-job="{jid}"' in html and "dd-x" in html
 
 
 def test_dismiss_one_removes_it_from_the_retry_list(client, raw_sql):
@@ -28,10 +28,17 @@ def test_dismiss_one_removes_it_from_the_retry_list(client, raw_sql):
 
 
 def test_dismiss_all(client, raw_sql):
-    _seed(client, raw_sql, 3)
+    jid = _seed(client, raw_sql, 3)
     assert client.post("/api/jobs/errors/dismiss-all").json()["dismissed"] == 3
-    assert "Ошибок нет" in client.get("/fragments/errors").text
+    assert f'data-job="{jid}"' not in client.get("/jobs").text
 
 
 def test_dismiss_unknown_is_404(client):
     assert client.post("/api/jobs/errors/99999/dismiss").status_code == 404
+
+
+def test_dismiss_one_jobs_errors_only(client, raw_sql):
+    a = _seed(client, raw_sql, 2)
+    b = _seed(client, raw_sql, 2)
+    assert client.post(f"/api/jobs/errors/dismiss-all?job_id={a}").json()["dismissed"] == 2
+    assert client.post(f"/api/jobs/{b}/retry").json()["requeued"] == 2

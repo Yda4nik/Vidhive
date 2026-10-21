@@ -27,11 +27,14 @@ class JobCreate(BaseModel):
     max_retries: int = Field(default=4, ge=0)
     global_rate_limit_rps: int | None = Field(default=None, ge=1)
     stop_on_consecutive_missing: int | None = Field(default=None, ge=1)
+    # Give the job to one specific agent only (None = any agent).
+    worker_id: int | None = Field(default=None, ge=1)
 
 
 class JobOut(BaseModel):
     id: int
     name: str | None
+    assigned_worker_id: int | None = None
     range_start: int | None
     range_end: int | None
     state: JobState

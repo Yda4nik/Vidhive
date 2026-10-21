@@ -983,6 +983,9 @@ async def _active_job_rows(session: AsyncSession) -> list[dict]:
         )
     ).scalars().all()
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=_SPEED_WINDOW_SECONDS)
+    agent_names = {
+        w.id: w.name for w in (await session.execute(select(Worker))).scalars().all()
+    }
     rows = []
     for job in jobs:
         targets = (
@@ -1017,6 +1020,7 @@ async def _active_job_rows(session: AsyncSession) -> list[dict]:
         ).scalar_one()
         rows.append({
             "job": job,
+            "agent": agent_names.get(job.assigned_worker_id),
             "total": total,
             "processed": processed,
             "downloaded": downloaded,
@@ -1042,36 +1046,18 @@ async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_se
     return _page(request, "_jobs_table.html", {"rows": await _active_job_rows(session)})
 
 
-_ERRORS_SHOWN = 200
-
-
-async def _error_rows(session: AsyncSession) -> dict:
-    """Identifiers on the retry list (failed / rate-limited / waiting), newest first."""
-    statuses = ("failed", "rate_limited", "retry_wait")
+async def _error_jobs(session: AsyncSession) -> list[dict]:
+    """Jobs that have retryable errors, with how many (for the retry dropdown)."""
     rows = (
         await session.execute(
-            select(Item, Job.name)
-            .join(Job, Job.id == Item.job_id)
-            .where(Item.status.in_(statuses))
-            .order_by(Item.updated_at.desc())
-            .limit(_ERRORS_SHOWN)
+            select(Job.id, Job.name, func.count(Item.id))
+            .join(Item, Item.job_id == Job.id)
+            .where(Item.status.in_(("failed", "rate_limited", "retry_wait")))
+            .group_by(Job.id, Job.name)
+            .order_by(Job.id.desc())
         )
     ).all()
-    return {
-        "errors": [
-            {"id": it.id, "job_id": it.job_id, "job_name": name, "external_id": it.external_id,
-             "status": it.status, "error": it.last_error or "", "attempts": it.attempts}
-            for it, name in rows
-        ],
-        "error_total": await _failed_item_count(session),
-        "errors_shown": _ERRORS_SHOWN,
-    }
-
-
-@router.get("/fragments/errors", response_class=HTMLResponse,
-            dependencies=[Depends(require_role("viewer"))])
-async def errors_fragment(request: Request, session: AsyncSession = Depends(get_session)):
-    return _page(request, "_errors_table.html", await _error_rows(session))
+    return [{"id": jid, "name": name, "count": n} for jid, name, n in rows]
 
 
 async def _all_jobs_brief(session: AsyncSession) -> list[dict]:
@@ -1086,7 +1072,15 @@ async def jobs_page(request: Request, error: str = "", session: AsyncSession = D
     ).scalars().all()
     return _page(request, "jobs.html", {
         "rows": await _active_job_rows(session),
-        **await _error_rows(session),
+        "error_jobs": await _error_jobs(session),
+        "workers": [
+            {"id": w.id, "name": w.name}
+            for w in (
+                await session.execute(
+                    select(Worker).where(Worker.state == "online").order_by(Worker.name)
+                )
+            ).scalars().all()
+        ],
         "failed_count": await _failed_item_count(session),
         "all_jobs": await _all_jobs_brief(session),
         "groups": [{"id": g.id, "name": g.name} for g in groups],
@@ -1205,8 +1199,12 @@ async def add_submit(
     range_to: list[str] = Form(default=[]),
     name: str = Form(""),
     group_id: str = Form(""),
+    worker_id: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
+    assigned = int(worker_id) if worker_id.isdigit() else None
+    if assigned is not None and await session.get(Worker, assigned) is None:
+        return RedirectResponse(url="/jobs?error=" + quote("выбранный агент не найден"), status_code=303)
     vals = [v.strip() for v in value if v.strip()]
     is_youtube = source == "youtube" or (
         mode == "link" and any(source_from_url(v) == "youtube" for v in vals)
@@ -1226,6 +1224,7 @@ async def add_submit(
         name=name.strip() or None,
         source=resolved_source,
         target_group_id=int(group_id) if group_id.isdigit() else None,
+        assigned_worker_id=assigned,
     )
     session.add(job)
     await session.flush()

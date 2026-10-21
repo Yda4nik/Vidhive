@@ -9,7 +9,7 @@
       <tr>
         <td>{{ job.id }}</td>
         <td>{{ job.name or "—" }}</td>
-        <td class="muted">{{ job.source }}</td>
+        <td class="muted">{{ job.source }}{% if r.agent %}<br><span class="pill run" title="Персональное задание">только {{ r.agent }}</span>{% endif %}</td>
         <td style="min-width:160px">
           {% if r.percent is not none %}
             <div class="bar"><span style="width:{{ r.percent }}%"></span></div>
