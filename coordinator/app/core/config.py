@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # Turn off only if the app is never exposed beyond a network you fully trust.
     restrict_public: bool = True
 
+    # Address agents deployed over SSH use to reach this coordinator (e.g. the tunnel's
+    # https://… link). Empty = the address the admin used to open the page.
+    public_url: str = ""
+
     log_level: str = "INFO"
 
     # Access control (all from env; empty admin/token = feature effectively off).

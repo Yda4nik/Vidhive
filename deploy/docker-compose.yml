@@ -32,6 +32,8 @@ services:
       VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
       # true = admin pages/setup/docs are closed to requests that come through a tunnel.
       VIDHIVE_RESTRICT_PUBLIC: ${VIDHIVE_RESTRICT_PUBLIC:-true}
+      # Address SSH-deployed agents use to reach the coordinator (e.g. the tunnel link).
+      VIDHIVE_PUBLIC_URL: ${VIDHIVE_PUBLIC_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

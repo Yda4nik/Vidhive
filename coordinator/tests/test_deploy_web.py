@@ -38,3 +38,23 @@ def test_deploy_starts_job_and_records(client, raw_sql, monkeypatch):
     # its env carries the coordinator's agent token slot and the parsed port
     # (verified indirectly: the row exists and the redirect points at a log page)
     assert "/servers/deploy/" in str(r.url)
+
+
+def test_deploy_uses_public_url_for_the_agent(client, monkeypatch):
+    from app.core import config
+
+    seen = {}
+
+    async def stub(params, on_line):
+        seen.update(params.env)
+        return 0
+
+    monkeypatch.setattr(deployer, "deploy", stub)
+    monkeypatch.setenv("VIDHIVE_PUBLIC_URL", "https://vidhive.example.org/")
+    config.get_settings.cache_clear()
+    try:
+        client.post("/servers/deploy", data=_FORM)
+    finally:
+        monkeypatch.delenv("VIDHIVE_PUBLIC_URL")
+        config.get_settings.cache_clear()
+    assert seen["VIDHIVE_COORDINATOR_URL"] == "https://vidhive.example.org"

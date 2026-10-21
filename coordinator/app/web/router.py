@@ -367,9 +367,11 @@ async def server_deploy(
 ):
     worker_name = worker_name.strip()
     ssh_host = ssh_host.strip()
-    # The agent reaches the coordinator at the same address the admin used to
-    # open the web UI; the agent serves files at its own host:8100 by default.
-    coordinator_url = str(request.base_url).rstrip("/")
+    # The agent reaches the coordinator at VIDHIVE_PUBLIC_URL when set (a remote server
+    # can't use a LAN address), else at the address the admin used to open the web UI;
+    # the agent serves files at its own host:8100 by default.
+    public_url = get_settings().public_url.strip().rstrip("/")
+    coordinator_url = public_url or str(request.base_url).rstrip("/")
     agent_url = agent_url.strip() or f"http://{ssh_host}:8100"
 
     errors = []
