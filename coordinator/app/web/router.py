@@ -35,7 +35,7 @@ from app.api.jobs import (
 from app.api.library import get_or_create_favorites
 from app.api.workers import delete_worker
 from app.db.models import AgentDeployment, Invite, RoleModel, User, UserRole
-from app.services import deployer, deployments, drain, netinfo, youtube
+from app.services import deployer, deployments, drain, netinfo, supervisor, youtube
 from app.services.agent_client import agent_headers, file_url
 from app.services.auth import ROLE_RANK, AccessError, require_role, role_of, seed_roles
 from app.services.ratelimit import login_limiter
@@ -969,6 +969,31 @@ async def register_submit(
     await session.commit()
     request.session["user_id"] = user.id  # log the newcomer straight in (as viewer)
     return RedirectResponse("/", status_code=303)
+
+
+# --------------------------------------------------------------------------- #
+# Administrator settings: public link and VPN (through the supervisor service)
+# --------------------------------------------------------------------------- #
+@router.get("/settings", response_class=HTMLResponse,
+            dependencies=[Depends(require_role("administrator"))])
+async def settings_page(request: Request):
+    return _page(request, "settings.html", {"initial": await supervisor.status()})
+
+
+@router.get("/settings/status", dependencies=[Depends(require_role("administrator"))])
+async def settings_status():
+    return JSONResponse(await supervisor.status())
+
+
+@router.post("/settings/tunnel", dependencies=[Depends(require_role("administrator"))])
+async def settings_tunnel(payload: dict):
+    return JSONResponse(await supervisor.set_tunnel(bool(payload.get("enabled"))))
+
+
+@router.post("/settings/vpn", dependencies=[Depends(require_role("administrator"))])
+async def settings_vpn(payload: dict):
+    targets = [str(t) for t in (payload.get("targets") or [])]
+    return JSONResponse(await supervisor.set_vpn(targets, bool(payload.get("enabled"))))
 
 
 @router.get("/events/stream", dependencies=[Depends(require_role("viewer"))])

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # https://… link). Empty = the address the admin used to open the page.
     public_url: str = ""
 
+    # Helper that runs the few Docker actions the settings page needs (public link, VPN).
+    supervisor_url: str = ""
+
     log_level: str = "INFO"
 
     # Access control (all from env; empty admin/token = feature effectively off).

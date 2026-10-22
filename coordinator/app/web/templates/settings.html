@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Vidhive — настройки{% endblock %}
+{% block content %}
+<style>
+  .sw { position:relative; width:46px; height:26px; flex:0 0 auto; }
+  .sw input { opacity:0; width:0; height:0; position:absolute; }
+  .sw .track { position:absolute; inset:0; border-radius:999px; background:var(--btn-bg); border:1px solid var(--line); transition:.15s; cursor:pointer; }
+  .sw .track::after { content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:var(--muted); transition:.15s; }
+  .sw input:checked + .track { background:var(--accent); border-color:var(--accent); }
+  .sw input:checked + .track::after { left:23px; background:var(--on-accent); }
+  .sw input:disabled + .track { opacity:.5; cursor:wait; }
+  .setrow { display:flex; align-items:center; gap:14px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .setrow:last-child { border-bottom:none; }
+  .setrow .grow { flex:1; min-width:0; }
+  .linkbox { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .linkbox a { word-break:break-all; font-size:15px; }
+</style>
+
+<div id="warn" class="card" style="border-color:var(--bad)" hidden>
+  <span style="color:var(--bad)" id="warn-text"></span>
+</div>
+
+<div class="card">
+  <h2>Публичная ссылка</h2>
+  <p class="muted tiny" style="margin-top:0">
+    Адрес, по которому приложение открывается из интернета (через Cloudflare). Войти по нему можно по логину и паролю;
+    админские разделы через эту ссылку открывает только главный администратор.
+  </p>
+  <div class="setrow">
+    <label class="sw"><input type="checkbox" id="tunnel-sw"><span class="track"></span></label>
+    <div class="grow">
+      <b>Публичная ссылка</b>
+      <div class="muted tiny" id="tunnel-state">…</div>
+    </div>
+  </div>
+  <div class="linkbox" id="link-box" hidden>
+    <a id="link-a" href="#" target="_blank" rel="noopener noreferrer"></a>
+    <span class="btn" onclick="copyLink()" id="copy-btn">Копировать</span>
+  </div>
+  <p class="muted tiny" style="margin-bottom:0">
+    Адрес быстрого туннеля меняется при каждом его перезапуске. Если Cloudflare удалит туннель, он перезапустится сам, и здесь
+    появится новый адрес. <span id="tunnel-restarts"></span>
+  </p>
+</div>
+
+<div class="card">
+  <h2>VPN</h2>
+  <p class="muted tiny" style="margin-top:0">
+    Через VPN агенты выходят в интернет (Германия): видно заблокированные сайты, например YouTube. Связь агентов с
+    координатором всегда напрямую.
+  </p>
+  <div class="setrow">
+    <label class="sw"><input type="checkbox" id="vpn-all"><span class="track"></span></label>
+    <div class="grow"><b>VPN для всех трёх агентов</b>
+      <div class="muted tiny" id="vpn-state">…</div></div>
+  </div>
+  <div id="agents"></div>
+  <p class="muted tiny" style="margin-bottom:0">
+    Само приложение (координатор) в VPN не направляется: тогда пропал бы доступ к сайту из домашней сети.
+    Из-за этого разбор плейлистов YouTube идёт без VPN.
+  </p>
+</div>
+
+<script>
+  var AGENTS = ["agent-01", "agent-02", "agent-03"];
+  var busy = false, last = null;
+
+  function el(id) { return document.getElementById(id); }
+
+  function render(s) {
+    last = s;
+    var warn = el("warn");
+    if (!s || s.available === false) {
+      el("warn-text").textContent = "⚠ " + ((s && s.error) || "Сторож недоступен");
+      warn.hidden = false;
+      el("tunnel-sw").disabled = true; el("vpn-all").disabled = true;
+      return;
+    }
+    warn.hidden = true;
+
+    // ---- public link
+    var t = s.tunnel;
+    el("tunnel-sw").checked = t.enabled;
+    el("tunnel-sw").disabled = busy;
+    var txt;
+    if (!t.enabled) txt = "выключена";
+    else if (t.registered && t.url) txt = "работает";
+    else if (t.running) txt = "подключается… (до минуты)";
+    else txt = "запускается…";
+    if (t.enabled && t.note) txt += " · " + t.note;
+    el("tunnel-state").textContent = txt;
+    var box = el("link-box");
+    if (t.enabled && t.url) {
+      var a = el("link-a"); a.href = t.url; a.textContent = t.url; box.hidden = false;
+    } else { box.hidden = true; }
+    el("tunnel-restarts").textContent = t.restarts ? "Автоперезапусков с запуска сторожа: " + t.restarts + "." : "";
+
+    // ---- VPN
+    var on = AGENTS.filter(function (n) { return s.agents[n] && s.agents[n].enabled; }).length;
+    el("vpn-all").checked = on === AGENTS.length;
+    el("vpn-all").disabled = busy;
+    el("vpn-state").textContent = (s.vpn.running ? "контейнер VPN работает (" + (s.vpn.address || "?") + ")" : "контейнер VPN остановлен")
+      + " · включён у " + on + " из " + AGENTS.length;
+    var box2 = el("agents"); box2.textContent = "";
+    AGENTS.forEach(function (name) {
+      var a = s.agents[name] || {};
+      var row = document.createElement("div"); row.className = "setrow";
+      var lab = document.createElement("label"); lab.className = "sw";
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!a.enabled; cb.disabled = busy || !a.running;
+      cb.onchange = function () { act("/settings/vpn", { targets: [name], enabled: cb.checked }); };
+      var tr = document.createElement("span"); tr.className = "track";
+      lab.appendChild(cb); lab.appendChild(tr);
+      var g = document.createElement("div"); g.className = "grow";
+      var b = document.createElement("b"); b.textContent = name;
+      var st = document.createElement("div"); st.className = "muted tiny";
+      st.textContent = !a.running ? "агент не запущен" : (a.active ? "выходит через VPN" : (a.enabled ? "включается…" : "выходит напрямую"));
+      g.appendChild(b); g.appendChild(st);
+      row.appendChild(lab); row.appendChild(g); box2.appendChild(row);
+    });
+  }
+
+  function load() {
+    fetch("/settings/status").then(function (r) { return r.json(); }).then(function (s) { if (!busy) render(s); })
+      .catch(function () {});
+  }
+
+  function act(url, payload) {
+    busy = true; render(last);
+    fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); })
+      .then(function (res) { if (res && res.ok === false && res.error) vhAlert(res.error); })
+      .catch(function () { vhAlert("Не удалось связаться с сервером"); })
+      .then(function () { busy = false; load(); });
+  }
+
+  el("tunnel-sw").onchange = function () { act("/settings/tunnel", { enabled: el("tunnel-sw").checked }); };
+  el("vpn-all").onchange = function () { act("/settings/vpn", { targets: AGENTS, enabled: el("vpn-all").checked }); };
+
+  function copyLink() {
+    var u = el("link-a").textContent;
+    if (navigator.clipboard) navigator.clipboard.writeText(u).then(function () { el("copy-btn").textContent = "Скопировано"; setTimeout(function () { el("copy-btn").textContent = "Копировать"; }, 1500); });
+  }
+
+  render({{ initial | tojson }});
+  setInterval(load, 3000);
+</script>
+{% endblock %}

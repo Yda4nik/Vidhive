@@ -34,6 +34,7 @@ services:
       VIDHIVE_RESTRICT_PUBLIC: ${VIDHIVE_RESTRICT_PUBLIC:-true}
       # Who may open admin pages via a public link: none | owner | any (see .env.example).
       VIDHIVE_PUBLIC_ADMIN: ${VIDHIVE_PUBLIC_ADMIN:-none}
+      VIDHIVE_SUPERVISOR_URL: http://supervisor:8200
       # Address SSH-deployed agents use to reach the coordinator (e.g. the tunnel link).
       VIDHIVE_PUBLIC_URL: ${VIDHIVE_PUBLIC_URL:-}
     depends_on:
@@ -46,6 +47,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [vidhive]
+
+  # Runs the few Docker actions behind the "Settings" page (public link on/off, VPN on/off for
+  # the agents) and keeps them healthy: restarts a dead tunnel, repairs the agents' VPN route.
+  # It holds the Docker socket, so it is NOT published to the host, answers only requests with
+  # the shared agent token and can touch only the services named in supervisor/app.py.
+  supervisor:
+    restart: unless-stopped
+    build:
+      context: ..
+      dockerfile: supervisor/Dockerfile
+    environment:
+      VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
+      COMPOSE_PROJECT: vidhive
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - supervisor-state:/state
     networks: [vidhive]
 
   # Optional public link: a Cloudflare "Quick Tunnel" (free, no account). It makes an
@@ -191,6 +209,7 @@ networks:
 
 volumes:
   pgdata:
+  supervisor-state:
   videos-01:
   videos-02:
   videos-03:

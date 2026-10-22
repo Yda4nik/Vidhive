@@ -105,6 +105,10 @@
     <div class="head-right" style="gap:10px; align-items:center">
       {% if request.state.user %}
         <span class="muted tiny">{{ request.state.user.username }} · {{ request.state.role }}</span>
+        {% if request.state.role == 'administrator' %}
+          <a class="btn" href="/settings" title="Настройки: публичная ссылка и VPN"
+             style="text-decoration:none">⚙ Настройки</a>
+        {% endif %}
         <form method="post" action="/logout" class="inline">
           <input type="submit" class="btn" value="Выйти">
         </form>
@@ -223,15 +227,28 @@
           if (window.liveRefresh) { try { window.liveRefresh(); } catch (e) {} }
         }, 120);  // coalesce bursts of events into one refresh
       }
-      var es = null;
+      var es = null, retryTimer = null;
       function connect() {
+        if (es || document.hidden) return;           // a hidden tab keeps no connection
         es = new EventSource("/events/stream");
         es.onmessage = schedule;
-        es.onerror = function () { /* EventSource reconnects on its own */ };
+        es.onerror = function () {
+          // EventSource retries on its own, but a connection the server closed for good
+          // (readyState CLOSED) must be reopened by hand.
+          if (es && es.readyState === 2) { es = null; clearTimeout(retryTimer); retryTimer = setTimeout(connect, 3000); }
+        };
       }
+      function disconnect() { if (es) { es.close(); es = null; } clearTimeout(retryTimer); }
       connect();
+      // Browsers allow ~6 connections per site: tabs left in the background must not hold
+      // one each, or every page load stalls. Hidden -> close; visible -> reopen and refresh.
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) { disconnect(); } else { connect(); schedule(); }
+      });
       // Close the stream on navigation so its connection slot frees immediately.
-      window.addEventListener("pagehide", function () { if (es) es.close(); });
+      window.addEventListener("pagehide", disconnect);
+      // Safety net: refresh a visible page every 30 s even if a push was missed.
+      setInterval(function () { if (!document.hidden) schedule(); }, 30000);
     })();
   </script>
   {% endif %}
