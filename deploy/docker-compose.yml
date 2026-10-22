@@ -66,6 +66,24 @@ services:
         condition: service_healthy
     networks: [vidhive]
 
+  # Optional VPN gateway for the agents (AmneziaWG). The agents send their internet traffic
+  # through this container (set VIDHIVE_EGRESS_GATEWAY=vpn in .env); coordinator <-> agent
+  # traffic stays on the Docker network. The tunnel config holds secrets and is NOT in git:
+  # put it at deploy/vpn/awg0.conf (mode 600). Image: any with awg-quick + amneziawg-go.
+  #   start :  docker compose --profile vpn up -d vpn
+  #   check :  docker compose exec vpn awg show
+  vpn:
+    profiles: ["vpn"]
+    image: ${VPN_IMAGE:-amneziawg-ready:latest}
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    volumes:
+      - ./vpn/awg0.conf:/etc/amnezia/amneziawg/awg0.conf
+    networks: [vidhive]
+
   # Controllable stand-in for the target service, for safe end-to-end runs
   # (spec sections 20 and 23). Returns 200+video / 404 / 403 / 429 / 500 by id.
   mock:

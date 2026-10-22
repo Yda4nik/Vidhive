@@ -61,3 +61,8 @@ node_modules/
 # ---- Local databases / scratch ----
 *.db
 _verify.db
+
+# VPN tunnel configs hold private keys
+deploy/vpn/
+*.vpn
+*.conf.bak*
