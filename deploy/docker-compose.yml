@@ -75,6 +75,8 @@ services:
   vpn:
     profiles: ["vpn"]
     image: ${VPN_IMAGE:-amneziawg-ready:latest}
+    # The image's default command (/setup.sh) exits; bring the tunnel up and keep running.
+    command: ["bash", "-c", "awg-quick up awg0 && tail -f /dev/null"]
     restart: unless-stopped
     cap_add: [NET_ADMIN]
     devices: ["/dev/net/tun:/dev/net/tun"]
