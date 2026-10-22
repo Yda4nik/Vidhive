@@ -36,6 +36,8 @@ STATE_FILE = os.environ.get("STATE_FILE", "/state/state.json")
 PORT = int(os.environ.get("SUPERVISOR_PORT", "8200"))
 RECONCILE_SECONDS = int(os.environ.get("RECONCILE_SECONDS", "15"))
 AGENTS = ("agent-01", "agent-02", "agent-03")
+TS_CONTAINER = os.environ.get("TAILSCALE_CONTAINER", "ix-tailscale-tailscale-1")
+FUNNEL_TARGET = os.environ.get("FUNNEL_TARGET_PORT", "8000")
 URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 
 _lock = threading.RLock()
@@ -227,6 +229,48 @@ def stop_tunnel() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Permanent address through Tailscale Funnel (preferred when the tailnet allows it)
+# --------------------------------------------------------------------------- #
+def ts_container() -> dict | None:
+    flt = json.dumps({"name": [TS_CONTAINER]})
+    status, lst = docker("GET", "/containers/json?filters=" + quote(flt))
+    return next((c for c in lst if is_running(c)), None) if status == 200 and isinstance(lst, list) else None
+
+
+def ts_exec(cmd: list[str]) -> str:
+    c = ts_container()
+    return exec_in(c["Id"], cmd) if c else ""
+
+
+def funnel_info() -> dict:
+    """Is Tailscale Funnel usable here, and is it switched on for the app?"""
+    if ts_container() is None:
+        return {"available": False, "enabled": False, "url": None, "reason": "контейнер Tailscale не найден"}
+    try:
+        d = json.loads(ts_exec(["tailscale", "status", "--json"]) or "{}")
+    except ValueError:
+        return {"available": False, "enabled": False, "url": None, "reason": "Tailscale не отвечает"}
+    me = d.get("Self") or {}
+    dns = (me.get("DNSName") or "").rstrip(".")
+    caps = set(me.get("CapMap") or {}) | set(me.get("Capabilities") or [])
+    has_funnel = any("funnel" in str(k).lower() for k in caps)
+    https_ok = bool(d.get("CertDomains"))
+    if not (has_funnel and https_ok):
+        why = "в Tailscale не включён HTTPS" if not https_ok else "в Tailscale не включён Funnel"
+        return {"available": False, "enabled": False, "url": None, "reason": why, "dns": dns}
+    enabled = "Funnel on" in ts_exec(["tailscale", "funnel", "status"])
+    return {"available": True, "enabled": enabled, "url": f"https://{dns}" if dns and enabled else None,
+            "reason": "", "dns": dns}
+
+
+def set_funnel(enabled: bool) -> tuple[bool, str]:
+    cmd = ["tailscale", "funnel", "--bg", FUNNEL_TARGET] if enabled else ["tailscale", "funnel", "--https=443", "off"]
+    out = ts_exec(cmd)
+    ok = funnel_info()["enabled"] == enabled
+    return ok, "" if ok else ("Tailscale ответил: " + out.strip()[:160])
+
+
+# --------------------------------------------------------------------------- #
 # Reconcile loop: make reality match the desired state
 # --------------------------------------------------------------------------- #
 def reconcile() -> None:
@@ -241,6 +285,15 @@ def reconcile() -> None:
             if target and current_gateway(c["Id"]) != target:
                 log.info("fixing route of %s -> %s", svc, target)
                 exec_in(c["Id"], ["ip", "route", "replace", "default", "via", target])
+
+        # --- permanent Tailscale address, when available, replaces the Cloudflare tunnel
+        fn = funnel_info()
+        if fn["available"]:
+            if _state.get("tunnel") and not fn["enabled"]:
+                log.info("re-enabling Tailscale Funnel")
+                set_funnel(True)
+            stop_tunnel()   # one public address is enough: the Cloudflare tunnel is not needed
+            return
 
         # --- tunnel: keep it alive, renew it when Cloudflare deleted it
         if _state.get("tunnel"):
@@ -305,18 +358,20 @@ def status() -> dict:
             "enabled": bool(_state["agents"].get(svc)),
             "active": bool(running and gw and current_gateway(c["Id"]) == gw),
         }
-    tinfo = tunnel_info(find("tunnel"))
+    fn = funnel_info()
+    if fn["available"]:
+        tun = {"provider": "tailscale", "enabled": bool(_state.get("tunnel")), "running": fn["enabled"],
+               "registered": fn["enabled"], "url": fn["url"], "restarts": 0, "note": "постоянный адрес Tailscale"}
+    else:
+        tinfo = tunnel_info(find("tunnel"))
+        tun = {"provider": "cloudflare", "enabled": bool(_state.get("tunnel")), "running": tinfo["running"],
+               "registered": tinfo["registered"], "url": tinfo["url"] if tinfo["registered"] else None,
+               "restarts": _runtime["tunnel_restarts"], "note": _runtime["tunnel_note"]}
     return {
         "available": True,
         "vpn": {"running": is_running(vpn), "address": gw},
-        "tunnel": {
-            "enabled": bool(_state.get("tunnel")),
-            "running": tinfo["running"],
-            "registered": tinfo["registered"],
-            "url": tinfo["url"] if tinfo["registered"] else None,
-            "restarts": _runtime["tunnel_restarts"],
-            "note": _runtime["tunnel_note"],
-        },
+        "tunnel": tun,
+        "funnel": {"available": fn["available"], "reason": fn.get("reason", ""), "dns": fn.get("dns", "")},
         "agents": agents,
     }
 
@@ -326,7 +381,10 @@ def set_tunnel(enabled: bool) -> dict:
         _state["tunnel"] = bool(enabled)
         save_state()
         _runtime["tunnel_note"] = ""
-        if enabled:
+        if funnel_info()["available"]:
+            ok, msg = set_funnel(bool(enabled))
+            stop_tunnel()
+        elif enabled:
             ok, msg = start_tunnel()
         else:
             stop_tunnel()

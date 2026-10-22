@@ -37,10 +37,20 @@
     <a id="link-a" href="#" target="_blank" rel="noopener noreferrer"></a>
     <span class="btn" onclick="copyLink()" id="copy-btn">Копировать</span>
   </div>
-  <p class="muted tiny" style="margin-bottom:0">
-    Адрес быстрого туннеля меняется при каждом его перезапуске. Если Cloudflare удалит туннель, он перезапустится сам, и здесь
-    появится новый адрес. <span id="tunnel-restarts"></span>
+  <p class="muted tiny" style="margin-bottom:0" id="cf-note">
+    Сейчас используется быстрый туннель Cloudflare: его адрес меняется при каждом перезапуске. Если Cloudflare удалит туннель,
+    он перезапустится сам, и здесь появится новый адрес. <span id="tunnel-restarts"></span>
   </p>
+  <div id="funnel-hint" class="muted tiny" style="margin-top:12px" hidden>
+    <b>Как получить постоянный адрес (Tailscale Funnel).</b> Он не меняется и работает стабильнее. Один раз в
+    <a href="https://login.tailscale.com/admin" target="_blank" rel="noopener noreferrer">панели Tailscale</a>:
+    <ol style="margin:6px 0 0 18px; padding:0">
+      <li>Раздел <b>DNS</b> → прокрутить до <b>HTTPS Certificates</b> → <b>Enable HTTPS</b>.</li>
+      <li>Раздел <b>Access controls</b> → в блок <code>nodeAttrs</code> добавить
+        <code>{"target": ["autogroup:member"], "attr": ["funnel"]}</code> и сохранить.</li>
+    </ol>
+    Через минуту эта страница сама перейдёт на постоянный адрес. <span id="funnel-why"></span>
+  </div>
 </div>
 
 <div class="card">
@@ -93,6 +103,10 @@
     if (t.enabled && t.url) {
       var a = el("link-a"); a.href = t.url; a.textContent = t.url; box.hidden = false;
     } else { box.hidden = true; }
+    var fav = s.funnel && s.funnel.available;
+    el("funnel-hint").hidden = !!fav;
+    el("funnel-why").textContent = (!fav && s.funnel && s.funnel.reason) ? "(Сейчас: " + s.funnel.reason + ".)" : "";
+    el("cf-note").hidden = t.provider === "tailscale";
     el("tunnel-restarts").textContent = t.restarts ? "Автоперезапусков с запуска сторожа: " + t.restarts + "." : "";
 
     // ---- VPN

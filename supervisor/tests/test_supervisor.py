@@ -34,6 +34,16 @@ class FakeDocker:
         monkeypatch.setattr(sup, "start_tunnel", self._start_tunnel)
         monkeypatch.setattr(sup, "stop_tunnel", lambda: self.running.__setitem__("tunnel", False))
         monkeypatch.setattr(sup, "save_state", lambda: None)
+        self.funnel = {"available": False, "enabled": False, "url": None, "reason": "в Tailscale не включён HTTPS"}
+        self.funnel_calls = []
+        monkeypatch.setattr(sup, "funnel_info", lambda: dict(self.funnel))
+        monkeypatch.setattr(sup, "set_funnel", self._set_funnel)
+
+    def _set_funnel(self, enabled):
+        self.funnel_calls.append(enabled)
+        self.funnel["enabled"] = enabled
+        self.funnel["url"] = "https://truenas.example.ts.net" if enabled else None
+        return True, ""
 
     def _exec(self, cid, cmd):
         if cmd[:4] == ["ip", "route", "replace", "default"]:
@@ -121,3 +131,25 @@ def test_http_requires_the_token(fake, monkeypatch):
         assert e2.value.code == 401
     finally:
         server.shutdown()
+
+
+def test_funnel_gives_a_permanent_address_and_replaces_the_cloudflare_tunnel(fake):
+    fake.funnel.update(available=True, enabled=False, reason="", dns="truenas.example.ts.net")
+    res = sup.set_tunnel(True)
+    assert res["ok"] and fake.funnel_calls == [True]
+    st = sup.status()["tunnel"]
+    assert st["provider"] == "tailscale" and st["url"] == "https://truenas.example.ts.net"
+    assert fake.running["tunnel"] is False                 # the Cloudflare container is not used
+
+
+def test_funnel_is_restored_by_the_reconcile_loop(fake):
+    fake.funnel.update(available=True, enabled=False, reason="", dns="truenas.example.ts.net")
+    sup._state["tunnel"] = True
+    sup.reconcile()
+    assert fake.funnel_calls == [True]
+
+
+def test_without_funnel_the_status_explains_why(fake):
+    st = sup.status()
+    assert st["tunnel"]["provider"] == "cloudflare"
+    assert st["funnel"]["available"] is False and "HTTPS" in st["funnel"]["reason"]
