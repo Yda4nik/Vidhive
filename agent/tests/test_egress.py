@@ -134,3 +134,44 @@ def test_worker_does_not_fall_back_when_the_download_works_on_the_vpn(tmp_path):
     runner.egress, runner.worker_id = eg, 1
     asyncio.run(runner.process_chunk(_lease(4, 1, 1)))
     assert eg.generation == 0 and checker.attempts == 1
+
+
+def test_only_youtube_needs_the_vpn():
+    from app.worker import needs_vpn
+    assert needs_vpn("https://www.youtube.com/watch?v=CCPsDy-LH0U") and needs_vpn("https://youtu.be/x")
+    assert needs_vpn(None)                                   # unknown: keep the current route
+    assert not needs_vpn("https://kinescope.io/{id}") and not needs_vpn("http://mock:8090/{id}")
+
+
+def test_a_kinescope_chunk_runs_direct_and_returns_to_the_vpn(tmp_path):
+    eg, ip = make(tmp_path)
+    seen = []
+
+    class Probe(FlakyChecker):
+        async def check(self, external_id, template=None):
+            seen.append(ip.gw)                               # which route is used for the work
+            return ItemResult(external_id=external_id, status=ItemStatus.NOT_FOUND)
+
+    runner = WorkerRunner(Settings(progress_batch=5, threads=2, enable_download=True), FakeClient(), Probe(ip))
+    runner.egress, runner.worker_id = eg, 1
+    lease = _lease(5, 1, 2)
+    lease.target_template = "https://kinescope.io/{id}"
+    asyncio.run(runner.process_chunk(lease))
+    assert seen == [DIRECT, DIRECT] and ip.gw == VPN         # direct while working, VPN afterwards
+
+
+def test_a_youtube_chunk_keeps_the_vpn(tmp_path):
+    eg, ip = make(tmp_path)
+    seen = []
+
+    class Probe(FlakyChecker):
+        async def check(self, external_id, template=None):
+            seen.append(ip.gw)
+            return ItemResult(external_id=external_id, status=ItemStatus.NOT_FOUND)
+
+    runner = WorkerRunner(Settings(progress_batch=5, threads=2, enable_download=True), FakeClient(), Probe(ip))
+    runner.egress, runner.worker_id = eg, 1
+    lease = _lease(6, 1, 1)
+    lease.target_template = "https://www.youtube.com/watch?v=CCPsDy-LH0U"
+    asyncio.run(runner.process_chunk(lease))
+    assert seen == [VPN] and eg.generation == 0

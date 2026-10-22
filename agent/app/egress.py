@@ -67,7 +67,7 @@ class EgressManager:
     def fallen_back(self) -> bool:
         return self._saved_gw is not None
 
-    async def fall_back(self, seen_generation: int) -> bool:
+    async def fall_back(self, seen_generation: int, reason: str = "VPN route failed") -> bool:
         """Switch to the direct route. True if a retry is worthwhile: the route was changed now
         or since the failed attempt began; False if there is no VPN route to leave."""
         async with self._lock:
@@ -86,7 +86,7 @@ class EgressManager:
                     f.write("1")
             except OSError:
                 pass
-            log.warning("VPN route failed: using the direct route until this chunk is done")
+            log.warning("%s: using the direct route until this chunk is done", reason)
             return True
 
     async def restore(self) -> None:

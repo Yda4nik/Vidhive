@@ -27,6 +27,17 @@ from vidhive_common.schemas import (
 log = logging.getLogger("vidhive.agent")
 
 
+_VPN_HOSTS = ("youtube.com", "youtu.be", "googlevideo.com")
+
+
+def needs_vpn(template: str | None) -> bool:
+    """Does this job's source need the VPN route? (Only YouTube does.) Unknown = keep the route."""
+    if not template:
+        return True
+    t = template.lower()
+    return any(h in t for h in _VPN_HOSTS) or not t.startswith("http")
+
+
 class WorkerRunner:
     def __init__(self, settings: Settings, client: CoordinatorClient, checker: Checker) -> None:
         self.settings = settings
@@ -147,6 +158,10 @@ class WorkerRunner:
         log.info("chunk %s: processing %s..%s", chunk.chunk_id, start, end)
         self._active_chunk_id = chunk.chunk_id
         try:
+            if not needs_vpn(chunk.target_template):
+                # The VPN is only there for sites that are blocked here (YouTube). Everything else
+                # is faster and more reliable on the direct route.
+                await self.egress.fall_back(self.egress.generation, reason="this source does not need the VPN")
             await self._process_chunk_body(chunk, start, end, batch)
         finally:
             self._active_chunk_id = None  # released: heartbeat stops renewing it
