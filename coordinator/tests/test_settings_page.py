@@ -76,3 +76,41 @@ def test_missing_supervisor_is_reported_not_crashed(client, monkeypatch):
     data = client.get("/settings/status").json()
     assert data["available"] is False and "Сторож" in data["error"]
     assert client.get("/settings").status_code == 200
+
+
+def test_invitation_links_use_the_public_address_while_it_is_on(client, fake_supervisor, raw_sql):
+    client.post("/users/invite")
+    token = raw_sql("SELECT token FROM invites ORDER BY id DESC LIMIT 1")[0][0]
+    html = client.get("/users").text
+    assert f"https://demo-words.trycloudflare.com/register?token={token}" in html
+
+
+def test_invitation_links_fall_back_to_the_page_address(client, monkeypatch, raw_sql):
+    async def down():
+        return {"available": False, "error": "нет связи"}
+
+    monkeypatch.setattr(supervisor, "status", down)
+    client.post("/users/invite")
+    token = raw_sql("SELECT token FROM invites ORDER BY id DESC LIMIT 1")[0][0]
+    assert f"/register?token={token}" in client.get("/users").text
+    assert "trycloudflare" not in client.get("/settings").text          # no leftover Cloudflare wording
+
+
+def test_invitation_link_is_https_behind_the_funnel_even_without_the_supervisor(client, monkeypatch, raw_sql):
+    async def down():
+        return {"available": False, "error": "нет связи"}
+
+    monkeypatch.setattr(supervisor, "status", down)
+    monkeypatch.setenv("VIDHIVE_PUBLIC_ADMIN", "owner")          # the owner may open /users publicly
+    config.get_settings.cache_clear()
+    try:
+        client.post("/users/invite")
+        token = raw_sql("SELECT token FROM invites ORDER BY id DESC LIMIT 1")[0][0]
+        html = client.get("/users", headers={"Host": "truenas-scale.example.ts.net",
+                                             "Tailscale-Funnel-Request": "?1",
+                                             "X-Forwarded-For": "203.0.113.7"}).text
+    finally:
+        monkeypatch.delenv("VIDHIVE_PUBLIC_ADMIN", raising=False)
+        config.get_settings.cache_clear()
+    assert f"https://truenas-scale.example.ts.net/register?token={token}" in html
+    assert "http://truenas-scale.example.ts.net/register" not in html

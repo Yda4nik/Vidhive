@@ -156,6 +156,13 @@ def current_gateway(cid: str) -> str | None:
     return m.group(1) if m else None
 
 
+def agent_in_fallback(cid: str) -> bool:
+    """The agent left the VPN on purpose (the VPN failed a task) and will return by itself.
+    The flag counts for 30 minutes at most, so a crashed agent cannot stay off the VPN."""
+    out = exec_in(cid, ["sh", "-c", 'test -n "$(find /run/vidhive-egress/direct -mmin -30 2>/dev/null)" && echo yes'])
+    return out.strip() == "yes"
+
+
 def agent_vpn_enabled(c: dict, via: str | None) -> bool:
     return bool(via) and current_gateway(c["Id"]) == via
 
@@ -309,6 +316,8 @@ def reconcile() -> None:
             c = find(svc)
             if want is None or not is_running(c):
                 continue
+            if want and agent_in_fallback(c["Id"]):
+                continue          # temporarily on the direct route; the agent restores the VPN itself
             target = vpn_ip() if want else bridge_gateway()
             if target and current_gateway(c["Id"]) != target:
                 log.info("fixing route of %s -> %s", svc, target)
@@ -381,10 +390,12 @@ def status() -> dict:
     for svc in AGENTS:
         c = find(svc)
         running = is_running(c)
+        fallback = bool(running and agent_in_fallback(c["Id"]))
         agents[svc] = {
             "running": running,
             "enabled": bool(_state["agents"].get(svc)),
             "active": bool(running and gw and current_gateway(c["Id"]) == gw),
+            "fallback": fallback,
         }
     fn = funnel_info()
     if fn["available"]:

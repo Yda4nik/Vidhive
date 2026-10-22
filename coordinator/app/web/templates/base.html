@@ -95,7 +95,7 @@
 <body>
   <header>
     <a class="brand" href="/" aria-label="Vidhive — на главную"><span class="brand-logo" aria-hidden="true"></span>Vidhive</a>
-    {% if request.state.user %}
+    {% if request.state.user and not bare %}
     <nav>
       <a href="/">Панель</a>
       <a href="/jobs">Задания</a>
@@ -107,7 +107,7 @@
     <span></span>   {# keeps the logo left and the theme button right on the login page #}
     {% endif %}
     <div class="head-right" style="gap:10px; align-items:center">
-      {% if request.state.user %}
+      {% if request.state.user and not bare %}
         <span class="muted tiny">{{ request.state.user.username }} · {{ request.state.role }}</span>
         {% if request.state.role == 'administrator' %}
           <a class="btn" href="/settings" title="Настройки: публичная ссылка и VPN"

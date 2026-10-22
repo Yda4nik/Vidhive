@@ -44,3 +44,14 @@ def test_password_change_enforces_the_minimum(client, raw_sql):
     uid = raw_sql("SELECT id FROM users LIMIT 1")[0][0]
     r = client.post(f"/users/{uid}/password", data={"password": "short"}, follow_redirects=False)
     assert "error=" in r.headers["location"]
+
+
+def test_a_used_or_expired_link_shows_no_registration_form(client, anon_client, raw_sql):
+    token = _invite(client, raw_sql)
+    assert 'name="username"' in anon_client.get(f"/register?token={token}").text          # valid: form shown
+    anon_client.post("/register", data={"token": token, "username": "once-only", "password": STRONG, "confirm": STRONG})
+    anon_client.post("/logout")
+    assert 'name="username"' not in anon_client.get(f"/register?token={token}").text      # used: no form
+    token2 = _invite(client, raw_sql)
+    raw_sql("UPDATE invites SET expires_at = datetime('now','-1 minute') WHERE token = ?", (token2,))
+    assert 'name="username"' not in anon_client.get(f"/register?token={token2}").text    # expired: no form

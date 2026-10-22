@@ -23,7 +23,7 @@
 <div class="card">
   <h2>Публичная ссылка</h2>
   <p class="muted tiny" style="margin-top:0">
-    Адрес, по которому приложение открывается из интернета (через Cloudflare). Войти по нему можно по логину и паролю;
+    Адрес, по которому приложение открывается из интернета. Войти по нему можно по логину и паролю;
     админские разделы через эту ссылку открывает только главный администратор.
   </p>
   <div class="setrow">
@@ -37,10 +37,6 @@
     <a id="link-a" href="#" target="_blank" rel="noopener noreferrer"></a>
     <span class="btn" onclick="copyLink()" id="copy-btn">Копировать</span>
   </div>
-  <p class="muted tiny" style="margin-bottom:0" id="cf-note">
-    Сейчас используется быстрый туннель Cloudflare: его адрес меняется при каждом перезапуске. Если Cloudflare удалит туннель,
-    он перезапустится сам, и здесь появится новый адрес. <span id="tunnel-restarts"></span>
-  </p>
   <div id="funnel-hint" class="muted tiny" style="margin-top:12px" hidden>
     <b>Как получить постоянный адрес (Tailscale Funnel).</b> Он не меняется и работает стабильнее. Один раз в
     <a href="https://login.tailscale.com/admin" target="_blank" rel="noopener noreferrer">панели Tailscale</a>:
@@ -97,7 +93,7 @@
     else if (t.registered && t.url) txt = "работает";
     else if (t.running) txt = "подключается… (до минуты)";
     else txt = "запускается…";
-    if (t.enabled && t.note) txt += " · " + t.note;
+    if (t.enabled && t.note && t.provider !== "tailscale") txt += " · " + t.note;
     el("tunnel-state").textContent = txt;
     var box = el("link-box");
     if (t.enabled && t.url) {
@@ -106,8 +102,6 @@
     var fav = s.funnel && s.funnel.available;
     el("funnel-hint").hidden = !!fav;
     el("funnel-why").textContent = (!fav && s.funnel && s.funnel.reason) ? "(Сейчас: " + s.funnel.reason + ".)" : "";
-    el("cf-note").hidden = t.provider === "tailscale";
-    el("tunnel-restarts").textContent = t.restarts ? "Автоперезапусков с запуска сторожа: " + t.restarts + "." : "";
 
     // ---- VPN
     var on = AGENTS.filter(function (n) { return s.agents[n] && s.agents[n].enabled; }).length;
@@ -127,7 +121,7 @@
       var g = document.createElement("div"); g.className = "grow";
       var b = document.createElement("b"); b.textContent = name;
       var st = document.createElement("div"); st.className = "muted tiny";
-      st.textContent = !a.running ? "агент не запущен" : (a.active ? "выходит через VPN" : (a.enabled ? "включается…" : "выходит напрямую"));
+      st.textContent = !a.running ? "агент не запущен" : (a.fallback ? "временно напрямую: VPN не справился, вернётся после задачи" : (a.active ? "выходит через VPN" : (a.enabled ? "включается…" : "выходит напрямую")));
       g.appendChild(b); g.appendChild(st);
       row.appendChild(lab); row.appendChild(g); box2.appendChild(row);
     });

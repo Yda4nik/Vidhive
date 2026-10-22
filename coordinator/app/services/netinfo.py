@@ -91,6 +91,8 @@ def is_https(request: Request) -> bool:
     h = request.headers
     if h.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https":
         return True
+    if "tailscale-funnel-request" in h:       # Funnel terminates TLS and talks http to us
+        return True
     visitor = h.get("cf-visitor", "")
     if visitor:
         try:

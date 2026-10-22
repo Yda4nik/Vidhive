@@ -13,6 +13,7 @@ import logging
 from app.checker import Checker
 from app.coordinator_client import CoordinatorClient
 from app.core.config import Settings
+from app.egress import EgressManager
 from vidhive_common.enums import ItemStatus
 from vidhive_common.schemas import (
     ChunkLease,
@@ -39,6 +40,8 @@ class WorkerRunner:
         self._active_chunk_id: int | None = None
         # external_id -> (title, percent) for downloads in flight; shown on the dashboard.
         self._progress: dict[int, tuple[str | None, float | None]] = {}
+        # Leaves the VPN route for the direct one when the VPN cannot do the job (see egress.py).
+        self.egress = EgressManager()
 
     # -- lifecycle ---------------------------------------------------------- #
     async def register(self) -> int:
@@ -147,6 +150,7 @@ class WorkerRunner:
             await self._process_chunk_body(chunk, start, end, batch)
         finally:
             self._active_chunk_id = None  # released: heartbeat stops renewing it
+            await self.egress.restore()    # the task is done: back to the VPN
 
     async def _process_chunk_body(self, chunk, start, end, batch) -> None:
         cur = start
@@ -182,7 +186,10 @@ class WorkerRunner:
         async with self._sem:
             self._active_checks += 1
             try:
+                gen = self.egress.generation
                 result = await self.checker.check(external_id, template)
+                if result.status == ItemStatus.RETRY_WAIT and await self.egress.fall_back(gen):
+                    result = await self.checker.check(external_id, template)   # same check, direct route
             finally:
                 self._active_checks -= 1
 
@@ -194,7 +201,13 @@ class WorkerRunner:
                     self._progress[_id] = (_title, pct)
 
                 try:
-                    file = await self.checker.download(external_id, result, on_progress=report)
+                    gen = self.egress.generation
+                    try:
+                        file = await self.checker.download(external_id, result, on_progress=report)
+                    except Exception:  # noqa: BLE001 - the VPN may be the reason; try the direct route
+                        if not await self.egress.fall_back(gen):
+                            raise
+                        file = await self.checker.download(external_id, result, on_progress=report)
                     result.status = ItemStatus.COMPLETED
                     result.size_bytes = file.size_bytes or result.size_bytes
                     result.mime_type = file.mime_type or result.mime_type

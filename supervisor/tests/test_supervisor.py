@@ -34,6 +34,8 @@ class FakeDocker:
         monkeypatch.setattr(sup, "start_tunnel", self._start_tunnel)
         monkeypatch.setattr(sup, "stop_tunnel", lambda: self.running.__setitem__("tunnel", False))
         monkeypatch.setattr(sup, "save_state", lambda: None)
+        self.fallback = set()
+        monkeypatch.setattr(sup, "agent_in_fallback", lambda cid: cid in self.fallback)
         self.funnel = {"available": False, "enabled": False, "url": None, "reason": "в Tailscale не включён HTTPS"}
         self.funnel_calls = []
         monkeypatch.setattr(sup, "funnel_info", lambda: dict(self.funnel))
@@ -172,3 +174,14 @@ def test_a_tunnel_that_stays_disconnected_is_restarted(fake, monkeypatch):
                                                        "url": None, "down_for": 300.0, "age": 400})
     sup.reconcile()
     assert fake.tunnel_restarts == 1
+
+
+def test_reconcile_does_not_push_a_fallen_back_agent_to_the_vpn(fake):
+    sup.set_vpn(["agent-01"], True)
+    fake.routes["agent-01"] = "172.16.1.1"                 # the agent switched to the direct route itself
+    fake.fallback.add("agent-01")
+    sup.reconcile()
+    assert fake.routes["agent-01"] == "172.16.1.1"         # left alone while the flag is set
+    fake.fallback.clear()                                  # the agent finished and removed the flag
+    sup.reconcile()
+    assert fake.routes["agent-01"] == "172.16.1.9"         # now the wish (VPN) is enforced again

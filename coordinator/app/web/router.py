@@ -125,7 +125,12 @@ _JOB_ACTIONS = {
 }
 
 
+_BARE_PAGES = {"login.html", "register.html", "setup.html"}
+
+
 def _page(request: Request, name: str, ctx: dict, status_code: int = 200) -> HTMLResponse:
+    if name in _BARE_PAGES:
+        ctx = {**ctx, "bare": True}      # sign-in / registration / first-run: logo and theme only
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
@@ -805,10 +810,36 @@ async def _owner_id(session: AsyncSession) -> int | None:
     return (await session.execute(select(func.min(User.id)))).scalar_one_or_none()
 
 
+ADMIN_ONLY_OWNER = "Администраторами управляет только владелец"
+
+
+async def _acts_as_owner(request: Request, session: AsyncSession) -> bool:
+    me = getattr(request.state, "user", None)
+    return me is not None and me.id == await _owner_id(session)
+
+
 async def _set_role(session: AsyncSession, user_id: int, role: str) -> None:
     await session.execute(UserRole.__table__.delete().where(UserRole.user_id == user_id))
     rid = (await session.execute(select(RoleModel.id).where(RoleModel.name == role))).scalar_one()
     session.add(UserRole(user_id=user_id, role_id=rid))
+
+
+def _origin(request: Request) -> str:
+    """The address the visitor used, with the scheme they used (https behind a proxy)."""
+    scheme = "https" if netinfo.is_https(request) else request.url.scheme
+    host = request.headers.get("host") or request.url.netloc
+    return f"{scheme}://{host}/"
+
+
+async def _public_base() -> str:
+    """The public address (with a trailing slash) while the public link is on, else ''."""
+    try:
+        status = await asyncio.wait_for(supervisor.status(), timeout=4)
+    except (asyncio.TimeoutError, Exception):  # noqa: BLE001 - invitations must work without it
+        return ""
+    t = (status or {}).get("tunnel") or {}
+    url = t.get("url") if t.get("enabled") and t.get("registered") else None
+    return url.rstrip("/") + "/" if url else ""
 
 
 @router.get("/users", response_class=HTMLResponse,
@@ -816,16 +847,21 @@ async def _set_role(session: AsyncSession, user_id: int, role: str) -> None:
 async def users_page(request: Request, error: str = "", session: AsyncSession = Depends(get_session)):
     ctx = await _users_context(session)
     ctx["error"] = error
+    ctx["i_am_owner"] = await _acts_as_owner(request, session)
+    ctx["assignable"] = ctx["roles"] if ctx["i_am_owner"] else [r for r in ctx["roles"] if r != "administrator"]
+    ctx["public_base"] = await _public_base() or _origin(request)
     return _page(request, "users.html", ctx)
 
 
 @router.post("/users", dependencies=[Depends(require_role("administrator"))])
 async def users_create(
-    username: str = Form(...), password: str = Form(...), role: str = Form("viewer"),
+    request: Request, username: str = Form(...), password: str = Form(...), role: str = Form("viewer"),
     session: AsyncSession = Depends(get_session),
 ):
     if role not in ROLE_RANK:
         return RedirectResponse("/users?error=неизвестная+роль", status_code=303)
+    if role == "administrator" and not await _acts_as_owner(request, session):
+        return RedirectResponse(f"/users?error={quote(ADMIN_ONLY_OWNER)}", status_code=303)
     err = _credentials_error(username, password)
     if err:
         return RedirectResponse(f"/users?error={quote(err)}", status_code=303)
@@ -852,6 +888,10 @@ async def users_set_role(
         return RedirectResponse("/users?error=неизвестная+роль", status_code=303)
     current = await role_of(session, user_id)
     me = request.state.user
+    # Only the owner hands out or takes away the administrator role: an administrator
+    # can neither promote anyone to administrator nor demote another administrator.
+    if (role == "administrator" or current == "administrator") and not await _acts_as_owner(request, session):
+        return RedirectResponse(f"/users?error={quote(ADMIN_ONLY_OWNER)}", status_code=303)
     # The owner (first-registered user) can never be demoted, by anyone.
     if user_id == await _owner_id(session) and role != "administrator":
         return RedirectResponse("/users?error=нельзя+понизить+владельца", status_code=303)
@@ -870,11 +910,16 @@ async def users_set_role(
 
 @router.post("/users/{user_id}/password", dependencies=[Depends(require_role("administrator"))])
 async def users_set_password(
-    user_id: int, password: str = Form(...), session: AsyncSession = Depends(get_session)
+    request: Request, user_id: int, password: str = Form(...),
+    session: AsyncSession = Depends(get_session),
 ):
     err = _credentials_error("", password, check_username=False)
     if err:
         return RedirectResponse(f"/users?error={quote(err)}", status_code=303)
+    me = request.state.user
+    if (await role_of(session, user_id) == "administrator" and (me is None or me.id != user_id)
+            and not await _acts_as_owner(request, session)):
+        return RedirectResponse(f"/users?error={quote(ADMIN_ONLY_OWNER)}", status_code=303)
     user = await session.get(User, user_id)
     if user is not None:
         user.password_hash = await ahash_password(password)
@@ -889,6 +934,8 @@ async def users_delete(
     me = request.state.user
     if user_id == await _owner_id(session):
         return RedirectResponse("/users?error=нельзя+удалить+владельца", status_code=303)
+    if await role_of(session, user_id) == "administrator" and not await _acts_as_owner(request, session):
+        return RedirectResponse(f"/users?error={quote(ADMIN_ONLY_OWNER)}", status_code=303)
     if me is not None and me.id == user_id:
         return RedirectResponse("/users?error=нельзя+удалить+себя", status_code=303)
     if await role_of(session, user_id) == "administrator" and await _admin_count(session) <= 1:

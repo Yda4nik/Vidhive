@@ -4,6 +4,9 @@
 # the Docker network itself (coordinator, other containers) keeps its direct, more specific
 # route, so only internet traffic goes through the VPN. Empty = no change.
 set -e
+# Remember the direct gateway: the agent returns to it when the VPN route fails (app/egress.py).
+mkdir -p /run/vidhive-egress && rm -f /run/vidhive-egress/direct
+ip route show default 2>/dev/null | awk '{print $3; exit}' > /run/vidhive-egress/direct_gw || true
 if [ -n "${VIDHIVE_EGRESS_GATEWAY:-}" ]; then
   GW="${VIDHIVE_EGRESS_GATEWAY}"
   # A service name (e.g. "vpn") is resolved to its IPv4 address; the gateway may start a bit later.

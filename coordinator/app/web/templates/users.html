@@ -9,7 +9,7 @@
     <div><label>Логин</label><input type="text" name="username" required></div>
     <div><label>Пароль</label><input type="password" name="password" required></div>
     <div><label>Роль</label>
-      <select name="role">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
+      <select name="role">{% for r in assignable %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
     </div>
     <input type="submit" class="btn primary" value="Создать">
   </form>
@@ -28,7 +28,7 @@
       <thead><tr><th>Ссылка</th><th>Осталось</th><th></th></tr></thead>
       <tbody>
       {% for inv in invites %}
-        {% set link = request.base_url|string ~ 'register?token=' ~ inv.token %}
+        {% set link = public_base ~ 'register?token=' ~ inv.token %}
         <tr>
           <td style="min-width:320px">
             <div class="in-row" style="display:flex; gap:6px; align-items:center">
@@ -59,7 +59,8 @@
     {% for u in users %}
       {% set is_me = request.state.user and u.id == request.state.user.id %}
       {% set is_owner = u.id == owner_id %}
-      {% set locked = is_me or is_owner %}
+      {% set admin_row = (u.role == 'administrator') and not i_am_owner %}
+      {% set locked = is_me or is_owner or admin_row %}
       <tr>
         <td>{{ u.username }}
           {% if is_owner %} <span class="muted tiny">(владелец)</span>
@@ -70,16 +71,18 @@
           {% else %}
           <form method="post" action="/users/{{ u.id }}/role" class="inline">
             <select name="role" onchange="this.form.submit()">
-              {% for r in roles %}<option value="{{ r }}" {{ 'selected' if u.role == r else '' }}>{{ r }}</option>{% endfor %}
+              {% for r in assignable %}<option value="{{ r }}" {{ 'selected' if u.role == r else '' }}>{{ r }}</option>{% endfor %}
             </select>
           </form>
           {% endif %}
         </td>
         <td style="white-space:nowrap">
+          {% if not admin_row or is_me %}
           <form method="post" action="/users/{{ u.id }}/password" class="inline">
             <input type="hidden" name="password" class="pw">
             <span class="btn" data-username="{{ u.username }}" onclick="resetPassword(this.closest('form'), this.dataset.username)">Сбросить пароль</span>
           </form>
+          {% endif %}
           {% if not locked %}
           <form method="post" action="/users/{{ u.id }}/delete" class="inline" data-username="{{ u.username }}"
                 onsubmit="return vhConfirmForm(this, 'Удалить пользователя ' + this.dataset.username + '?')">
