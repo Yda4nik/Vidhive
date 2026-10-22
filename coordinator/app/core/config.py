@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # Turn off only if the app is never exposed beyond a network you fully trust.
     restrict_public: bool = True
 
+    # Who may open administrator pages through a public link while restrict_public is on:
+    #   none  - nobody (admin work only from the home network / Tailscale)   [default]
+    #   owner - only the main administrator (the first account ever created)
+    #   any   - every administrator
+    public_admin: str = "none"
+
     # Address agents deployed over SSH use to reach this coordinator (e.g. the tunnel's
     # https://… link). Empty = the address the admin used to open the page.
     public_url: str = ""

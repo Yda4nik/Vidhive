@@ -20,6 +20,11 @@ log = logging.getLogger("vidhive.auth")
 
 ROLE_RANK = {"viewer": 1, "operator": 2, "administrator": 3}
 
+PUBLIC_OWNER_ONLY = (
+    "Через публичную ссылку этот раздел открывает только главный администратор; "
+    "остальные администраторы работают из домашней сети (или по Tailscale)."
+)
+
 PUBLIC_DENIED = (
     "Этот раздел доступен только из домашней сети (или по Tailscale), "
     "а не через публичную ссылку."
@@ -95,18 +100,32 @@ async def load_current_user(request: Request) -> None:
         request.state.role = await role_of(session, user.id)
 
 
+async def _owner_id() -> int | None:
+    """The owner is the first-registered user (smallest id) — protected from demotion."""
+    async with get_sessionmaker()() as session:
+        return (await session.execute(select(func.min(User.id)))).scalar_one_or_none()
+
+
 def require_role(min_role: str):
     minimum = ROLE_RANK[min_role]
 
     async def _dep(request: Request) -> User:
-        # Administrator functions (servers, SSH deploy, users) are for the home network
-        # only: a hijacked admin session on a public link must not be able to reach them.
+        # Administrator functions (servers, SSH deploy, users) over a public link are
+        # limited by VIDHIVE_PUBLIC_ADMIN: nobody (default), only the owner, or any admin.
         if (
             min_role == "administrator"
             and get_settings().restrict_public
             and netinfo.is_public(request)
         ):
-            raise AccessError(403, authenticated=False, detail=PUBLIC_DENIED)
+            mode = (get_settings().public_admin or "none").strip().lower()
+            if mode == "owner":
+                user = getattr(request.state, "user", None)
+                if user is None:
+                    raise AccessError(401, authenticated=False)  # sign in first
+                if user.id != await _owner_id():
+                    raise AccessError(403, authenticated=True, detail=PUBLIC_OWNER_ONLY)
+            elif mode != "any":
+                raise AccessError(403, authenticated=False, detail=PUBLIC_DENIED)
         user = getattr(request.state, "user", None)
         if user is None:
             raise AccessError(401, authenticated=False)
