@@ -179,8 +179,35 @@ def set_agent_vpn(service: str, enabled: bool) -> tuple[bool, str]:
 # --------------------------------------------------------------------------- #
 # Public link (Cloudflare quick tunnel inside the VPN network namespace)
 # --------------------------------------------------------------------------- #
+_UP = "Registered tunnel connection"
+_DOWN = ("Unable to establish connection", "Serve tunnel error", "Connection terminated",
+         "Lost connection with the edge", "Retrying connection")
+_TS_RE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)Z")
+
+
+def connection_state(text: str) -> tuple[bool, float]:
+    """(connected, seconds it has been down) from cloudflared's log: the LAST event decides.
+
+    An old "Registered tunnel connection" line must not hide that the connection has been
+    failing since: a dead link would be shown as working."""
+    from datetime import datetime, timezone
+    state, down_since = None, None
+    for line in text.splitlines():
+        if _UP in line:
+            state, down_since = "up", None
+        elif any(k in line for k in _DOWN):
+            if state != "down":
+                m = _TS_RE.match(line)
+                down_since = (datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+                              if m else time.time())
+            state = "down"
+    if state == "up":
+        return True, 0.0
+    return False, (time.time() - down_since) if down_since else 0.0
+
+
 def tunnel_info(c: dict | None) -> dict:
-    info = {"running": is_running(c), "url": None, "registered": False}
+    info = {"running": is_running(c), "url": None, "registered": False, "dead": False, "down_for": 0.0, "age": 0}
     if not c or not info["running"]:
         return info
     started = inspect(c["Id"]).get("State", {}).get("StartedAt", "")
@@ -194,9 +221,10 @@ def tunnel_info(c: dict | None) -> dict:
     text = demux(raw)
     urls = URL_RE.findall(text)
     info["url"] = urls[-1] if urls else None
-    info["registered"] = "Registered tunnel connection" in text
-    info["dead"] = "Tunnel not found" in text.rsplit("Registered tunnel connection", 1)[-1] \
-        if "Registered tunnel connection" in text else ("Tunnel not found" in text)
+    info["registered"], info["down_for"] = connection_state(text)
+    seen_up = _UP in text
+    after_up = text.rsplit(_UP, 1)[-1] if seen_up else text
+    info["dead"] = "Tunnel not found" in after_up
     info["age"] = time.time() - since if since else 0
     return info
 
@@ -312,10 +340,10 @@ def reconcile() -> None:
                     _runtime["tunnel_restarts"] += 1
                 return
             info = tunnel_info(c)
-            stuck = (not info["registered"]) and info.get("age", 0) > 90
+            stuck = (not info["registered"]) and (info.get("down_for", 0) > 150 or info.get("age", 0) > 150)
             if (info.get("dead") or stuck) and now - _runtime["last_restart"] > 60:
-                log.info("tunnel is %s - restarting for a new address", "deleted" if info.get("dead") else "not registering")
-                _runtime["tunnel_note"] = "туннель перезапущен: " + ("Cloudflare удалил старый" if info.get("dead") else "не подключался")
+                log.info("tunnel is %s - restarting for a new address", "deleted" if info.get("dead") else "not connecting")
+                _runtime["tunnel_note"] = "туннель перезапущен: " + ("Cloudflare удалил старый" if info.get("dead") else "не было связи с Cloudflare")
                 start_tunnel()
                 _runtime["tunnel_restarts"] += 1
 

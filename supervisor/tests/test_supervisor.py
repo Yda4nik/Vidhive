@@ -153,3 +153,22 @@ def test_without_funnel_the_status_explains_why(fake):
     st = sup.status()
     assert st["tunnel"]["provider"] == "cloudflare"
     assert st["funnel"]["available"] is False and "HTTPS" in st["funnel"]["reason"]
+
+
+def test_the_last_event_decides_whether_the_tunnel_is_connected():
+    up = "2026-10-22T21:00:00Z INF Registered tunnel connection connIndex=0\n"
+    down = "2026-10-22T21:01:00Z ERR Unable to establish connection with Cloudflare edge error=timeout\n"
+    assert sup.connection_state(up)[0] is True
+    connected, down_for = sup.connection_state(up + down)
+    assert connected is False and down_for > 0                    # an old "Registered" must not hide it
+    again = "2026-10-22T21:02:00Z INF Registered tunnel connection\n"
+    assert sup.connection_state(up + down + again)[0] is True
+    assert sup.connection_state("")[0] is False
+
+
+def test_a_tunnel_that_stays_disconnected_is_restarted(fake, monkeypatch):
+    sup._state["tunnel"] = True
+    monkeypatch.setattr(sup, "tunnel_info", lambda c: {"running": True, "registered": False, "dead": False,
+                                                       "url": None, "down_for": 300.0, "age": 400})
+    sup.reconcile()
+    assert fake.tunnel_restarts == 1
