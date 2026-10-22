@@ -624,6 +624,24 @@ async def server_remove(
     return RedirectResponse(f"/servers/deploy/{dep.id}", status_code=303)
 
 
+_USERNAME_MIN, _USERNAME_MAX, _PASSWORD_MIN = 3, 32, 8
+
+
+def _credentials_error(username: str, password: str, *, check_username: bool = True) -> str | None:
+    """Rules for new accounts: a sane login and a password that is not trivially short."""
+    if check_username:
+        u = username.strip()
+        if not (_USERNAME_MIN <= len(u) <= _USERNAME_MAX):
+            return f"Логин: от {_USERNAME_MIN} до {_USERNAME_MAX} символов"
+        if any(ord(c) < 32 for c in u):
+            return "Логин содержит недопустимые символы"
+    if len(password) < _PASSWORD_MIN:
+        return f"Пароль: не короче {_PASSWORD_MIN} символов"
+    if not password.strip():
+        return "Пароль не может состоять из пробелов"
+    return None
+
+
 async def _user_count(session: AsyncSession) -> int:
     return (await session.execute(select(func.count()).select_from(User))).scalar_one()
 
@@ -648,8 +666,9 @@ async def setup_submit(
     _deny_public_setup(request)
     if await _user_count(session) > 0:
         return RedirectResponse("/login", status_code=303)
-    if not username.strip() or not password:
-        return _page(request, "setup.html", {"error": "Заполните логин и пароль"})
+    err = _credentials_error(username, password)
+    if err:
+        return _page(request, "setup.html", {"error": err})
     if password != confirm:
         return _page(request, "setup.html", {"error": "Пароли не совпадают"})
     await seed_roles(session)
@@ -807,6 +826,10 @@ async def users_create(
 ):
     if role not in ROLE_RANK:
         return RedirectResponse("/users?error=неизвестная+роль", status_code=303)
+    err = _credentials_error(username, password)
+    if err:
+        return RedirectResponse(f"/users?error={quote(err)}", status_code=303)
+    username = username.strip()
     exists = (
         await session.execute(select(User).where(User.username == username))
     ).scalar_one_or_none()
@@ -849,6 +872,9 @@ async def users_set_role(
 async def users_set_password(
     user_id: int, password: str = Form(...), session: AsyncSession = Depends(get_session)
 ):
+    err = _credentials_error("", password, check_username=False)
+    if err:
+        return RedirectResponse(f"/users?error={quote(err)}", status_code=303)
     user = await session.get(User, user_id)
     if user is not None:
         user.password_hash = await ahash_password(password)
@@ -914,21 +940,28 @@ async def register_submit(
     invite = await _valid_invite(session, token)
     if invite is None:
         return _page(request, "register.html", {"invalid": True, "token": "", "error": ""})
-    if not username.strip() or not password:
-        return _page(request, "register.html",
-                     {"invalid": False, "token": token, "error": "Заполните логин и пароль"})
+    err = _credentials_error(username, password)
+    if err:
+        return _page(request, "register.html", {"invalid": False, "token": token, "error": err})
     if password != confirm:
         return _page(request, "register.html",
                      {"invalid": False, "token": token, "error": "Пароли не совпадают"})
+    username = username.strip()
     exists = (
-        await session.execute(select(User).where(User.username == username.strip()))
+        await session.execute(select(User).where(User.username == username))
     ).scalar_one_or_none()
     if exists is not None:
         return _page(request, "register.html",
                      {"invalid": False, "token": token, "error": "Такой логин уже занят"})
 
+    # An invitation works once: consume it atomically, so two people racing with the
+    # same link cannot both get in.
+    used = await session.execute(Invite.__table__.delete().where(Invite.id == invite.id))
+    if not used.rowcount:
+        return _page(request, "register.html", {"invalid": True, "token": "", "error": ""})
+
     await seed_roles(session)
-    user = User(username=username.strip(), password_hash=await ahash_password(password))
+    user = User(username=username, password_hash=await ahash_password(password))
     session.add(user)
     await session.flush()
     rid = (await session.execute(select(RoleModel.id).where(RoleModel.name == "viewer"))).scalar_one()

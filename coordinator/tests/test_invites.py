@@ -11,7 +11,7 @@ def test_register_via_invite_creates_viewer(client, raw_sql):
     # Registering logs the newcomer in on this client (replacing the admin session).
     r = client.post(
         "/register",
-        data={"token": token, "username": "newbie", "password": "pw", "confirm": "pw"},
+        data={"token": token, "username": "newbie", "password": "password123", "confirm": "password123"},
     )
     assert r.status_code == 200            # redirected to /
     # The newcomer is a viewer: can read, cannot create jobs.

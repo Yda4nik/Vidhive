@@ -58,7 +58,7 @@ def _seed(client, raw_sql):
     client.post("/api/groups", json={"name": HOSTILE})                       # library tabs
     client.post("/users/invite")                                              # a hostile username
     token = raw_sql("SELECT token FROM invites")[0][0]
-    client.post("/register", data={"token": token, "username": HOSTILE, "password": "p", "confirm": "p"})
+    client.post("/register", data={"token": token, "username": HOSTILE, "password": "password123", "confirm": "password123"})
     client.post("/login", data={"username": "tester-admin", "password": "adminpass"})
     wid = client.post("/api/workers/register", json={"name": HOSTILE}).json()["id"]
     raw_sql(                                                                  # SSH-deployed server row

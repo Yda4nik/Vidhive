@@ -1,9 +1,9 @@
 def test_admin_can_create_user_and_it_can_login(client):
-    r = client.post("/users", data={"username": "newop", "password": "pw", "role": "operator"})
+    r = client.post("/users", data={"username": "newop", "password": "password123", "role": "operator"})
     assert r.status_code == 200            # followed redirect to /users
     assert "newop" in r.text
     # Re-login as the new user on the same client; it can act as operator.
-    client.post("/login", data={"username": "newop", "password": "pw"})
+    client.post("/login", data={"username": "newop", "password": "password123"})
     assert client.post("/api/jobs", json={"range_start": 0, "range_end": 1}).status_code == 201
 
 

@@ -14,7 +14,7 @@ def test_setup_wizard_creates_first_admin(anon_client, raw_sql):
     _wipe_users(raw_sql)
     assert "Первоначальная настройка" in anon_client.get("/setup").text
     r = anon_client.post(
-        "/setup", data={"username": "root", "password": "rootpw", "confirm": "rootpw"}
+        "/setup", data={"username": "root", "password": "rootpassword", "confirm": "rootpassword"}
     )
     assert r.status_code == 200            # created, logged in, redirected to /
     # The new admin has full access.
@@ -28,6 +28,6 @@ def test_setup_wizard_creates_first_admin(anon_client, raw_sql):
 def test_setup_rejects_mismatched_passwords(anon_client, raw_sql):
     _wipe_users(raw_sql)
     r = anon_client.post(
-        "/setup", data={"username": "root", "password": "a", "confirm": "b"}
+        "/setup", data={"username": "root", "password": "password1", "confirm": "password2"}
     )
     assert "не совпад" in r.text.lower()
