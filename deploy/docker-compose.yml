@@ -90,11 +90,14 @@ services:
       VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
       VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-01
+      # Internet traffic through a VPN gateway container (e.g. 172.16.1.250); empty = direct.
+      VIDHIVE_EGRESS_GATEWAY: ${VIDHIVE_EGRESS_GATEWAY:-}
       # Threads: AGENT_THREADS sets all servers at once, AGENT_0N_THREADS
       # overrides one (individual wins over global — spec section 4).
       VIDHIVE_THREADS: ${AGENT_01_THREADS:-${AGENT_THREADS:-34}}
       VIDHIVE_STORAGE_PATH: /data/videos
       VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
+    cap_add: [NET_ADMIN]   # only used to move the default route when an egress gateway is set
     volumes:
       - videos-01:/data/videos
     depends_on:
@@ -113,9 +116,12 @@ services:
       VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
       VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-02
+      # Internet traffic through a VPN gateway container (e.g. 172.16.1.250); empty = direct.
+      VIDHIVE_EGRESS_GATEWAY: ${VIDHIVE_EGRESS_GATEWAY:-}
       VIDHIVE_THREADS: ${AGENT_02_THREADS:-${AGENT_THREADS:-33}}
       VIDHIVE_STORAGE_PATH: /data/videos
       VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
+    cap_add: [NET_ADMIN]   # only used to move the default route when an egress gateway is set
     volumes:
       - videos-02:/data/videos
     depends_on:
@@ -134,9 +140,12 @@ services:
       VIDHIVE_TARGET_TEMPLATE: ${TARGET_TEMPLATE:-http://kinescope.io/{id}}
       VIDHIVE_RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
       VIDHIVE_WORKER_NAME: agent-03
+      # Internet traffic through a VPN gateway container (e.g. 172.16.1.250); empty = direct.
+      VIDHIVE_EGRESS_GATEWAY: ${VIDHIVE_EGRESS_GATEWAY:-}
       VIDHIVE_THREADS: ${AGENT_03_THREADS:-${AGENT_THREADS:-33}}
       VIDHIVE_STORAGE_PATH: /data/videos
       VIDHIVE_AGENT_TOKEN: ${VIDHIVE_AGENT_TOKEN:-}
+    cap_add: [NET_ADMIN]   # only used to move the default route when an egress gateway is set
     volumes:
       - videos-03:/data/videos
     depends_on:

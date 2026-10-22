@@ -20,4 +20,5 @@ COPY agent /srv/agent
 WORKDIR /srv/agent
 
 EXPOSE 8100
+ENTRYPOINT ["sh", "/srv/agent/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100"]
