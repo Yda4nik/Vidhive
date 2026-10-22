@@ -77,13 +77,11 @@ services:
     image: ${VPN_IMAGE:-amneziawg-ready:latest}
     # The image's default command (/setup.sh) exits; bring the tunnel up and keep running.
     # awg-quick calls `sysctl`, which the image lacks; the one value it sets is given via
-    # `sysctls:` below, so a no-op stand-in is enough (no internet needed at start).
+    # `sysctls:` below, so a no-op stand-in (`true`) is enough (no internet needed at start).
     command:
       - bash
       - -c
-      - printf '#!/bin/sh
-exit 0
-' > /usr/local/bin/sysctl && chmod +x /usr/local/bin/sysctl && awg-quick up awg0 && tail -f /dev/null
+      - ln -sf /bin/true /usr/local/bin/sysctl && awg-quick up awg0 && tail -f /dev/null
     restart: unless-stopped
     cap_add: [NET_ADMIN]
     devices: ["/dev/net/tun:/dev/net/tun"]
