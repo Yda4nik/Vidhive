@@ -34,10 +34,26 @@ def target_dir(storage_path: str, external_id: int) -> Path:
     return Path(storage_path) / str(prefix) / str(external_id)
 
 
+# Over a lossy VPN a handshake or a read can time out and succeed on the next try: wait longer and
+# retry more before giving up.
+_PATIENT = {"socket_timeout": 30, "retries": 10, "extractor_retries": 5}
+
+_NETWORK_WORDS = ("timed out", "timeout", "connection", "unable to download", "network", "handshake",
+                  "temporary failure", "reset by peer", "no route", "unreachable", "ssl")
+
+
+def is_network_error(exc: BaseException) -> bool:
+    """A failure of the connection, not of the content: worth retrying (maybe on another route)."""
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError, httpx.TransportError)):
+        return True
+    text = str(exc).lower()
+    return any(w in text for w in _NETWORK_WORDS)
+
+
 def _default_probe(url: str) -> dict | None:
     from yt_dlp import YoutubeDL  # imported lazily; not needed for tests
 
-    opts = {"quiet": True, "skip_download": True, "noplaylist": True}
+    opts = {"quiet": True, "skip_download": True, "noplaylist": True, **_PATIENT}
     with YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
 
@@ -89,10 +105,10 @@ def _default_download(
         "outtmpl": out_template,
         "continuedl": True,                       # resume a partial .part download
         "concurrent_fragment_downloads": concurrency,  # HLS has many small fragments
-        "retries": 3,
-        "fragment_retries": 3,
+        "fragment_retries": 10,
         "noplaylist": True,
         "quiet": True,
+        **_PATIENT,
     }
     if progress is not None:
         opts["progress_hooks"] = [make_progress_hook(progress)]
@@ -182,7 +198,9 @@ class Checker:
         # Page exists — confirm a real downloadable stream via metadata.
         try:
             info = await asyncio.to_thread(self._probe, url)
-        except Exception as exc:  # noqa: BLE001 - a probe failure means "no media here"
+        except Exception as exc:  # noqa: BLE001
+            if is_network_error(exc):      # the connection failed, the video may well exist: retry later
+                return ItemResult(external_id=external_id, status=ItemStatus.RETRY_WAIT, error=str(exc)[:200])
             return ItemResult(external_id=external_id, status=ItemStatus.NOT_FOUND, error=str(exc)[:200])
 
         if not info:

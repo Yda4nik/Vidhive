@@ -95,3 +95,18 @@ def test_check_gives_up_after_max_retries():
     s = Settings(retry_base_delay=0.001, retry_max_delay=0.01, max_retries=2)
     r = _run(Checker(s, client).check(1))
     assert r.status == ItemStatus.RATE_LIMITED
+
+
+def test_a_probe_that_fails_on_the_network_is_retried_not_declared_missing():
+    def flaky(url):
+        raise RuntimeError("Unable to download webpage: The handshake operation timed out")
+
+    res = _run(_checker(200, probe=flaky).check(1))
+    assert res.status == ItemStatus.RETRY_WAIT and "timed out" in res.error
+
+
+def test_a_probe_that_fails_for_other_reasons_still_means_no_media():
+    def private(url):
+        raise RuntimeError("Video unavailable: this video is private")
+
+    assert _run(_checker(200, probe=private).check(1)).status == ItemStatus.NOT_FOUND
