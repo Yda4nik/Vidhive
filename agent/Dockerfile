@@ -3,9 +3,10 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# ffmpeg is needed by yt-dlp to merge best video+audio streams.
+# ffmpeg merges best video+audio (yt-dlp); iproute2 lets the entrypoint route internet
+# traffic through a VPN gateway container when asked to.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /srv
