@@ -7,13 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Event, Item, Job, MediaMetadata, Worker
+from app.db.models import Event, Item, Job, MediaMetadata, RangeChunk, Worker
 from app.db.session import get_session
 from app.services import scheduler
 from app.services.agent_client import agent_headers, file_url
 from app.services.auth import require_role
 from app.services.events import log_event
-from vidhive_common.enums import ItemStatus, JobState
+from vidhive_common.enums import ChunkStatus, ItemStatus, JobState
 from vidhive_common.ranges import RangeParseError, parse_range
 from vidhive_common.schemas import Ack, EventOut, ItemOut, JobCreate, JobOut
 
@@ -186,8 +186,15 @@ async def dismiss_all_errors(
     items = (await session.execute(stmt)).scalars().all()
     for item in items:
         item.status = ItemStatus.CANCELLED.value
+    # Blocks that were set aside after repeated failures are acknowledged the same way.
+    chunk_stmt = select(RangeChunk).where(RangeChunk.status == ChunkStatus.FAILED.value)
+    if job_id is not None:
+        chunk_stmt = chunk_stmt.where(RangeChunk.job_id == job_id)
+    chunks = (await session.execute(chunk_stmt)).scalars().all()
+    for c in chunks:
+        c.status = ChunkStatus.COMPLETED.value
     await session.commit()
-    return {"dismissed": len(items)}
+    return {"dismissed": len(items) + len(chunks)}
 
 
 @router.post("/retry-all", dependencies=[Depends(require_role("operator"))])

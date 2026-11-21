@@ -83,6 +83,9 @@ class AgentDeployment(Base):
     ssh_host: Mapped[str] = mapped_column(String(255), nullable=False)
     ssh_port: Mapped[int] = mapped_column(Integer, default=22, nullable=False)
     ssh_user: Mapped[str] = mapped_column(String(150), nullable=False)
+    # SSH host key fingerprint seen at install time (trust on first use): a later connection
+    # (teardown) must present the same key or it is refused.
+    host_key_fp: Mapped[str | None] = mapped_column(String(120))
     install_dir: Mapped[str] = mapped_column(String(500), nullable=False)
     service_name: Mapped[str] = mapped_column(String(150), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)

@@ -108,7 +108,7 @@
     {% endif %}
     <div class="head-right" style="gap:10px; align-items:center">
       {% if request.state.user and not bare %}
-        <span class="muted tiny">{{ request.state.user.username }} · {{ request.state.role }}</span>
+        <span class="muted tiny" style="white-space:nowrap">{{ request.state.user.username }} · {{ request.state.role }}</span>
         {% if request.state.role == 'administrator' %}
           <a class="btn" href="/settings" title="Настройки: публичная ссылка и VPN"
              style="text-decoration:none">⚙ Настройки</a>

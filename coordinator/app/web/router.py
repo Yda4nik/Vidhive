@@ -78,6 +78,7 @@ from app.db.models import (
     Job,
     JobTarget,
     MediaMetadata,
+    RangeChunk,
     Worker,
     WorkerMetric,
 )
@@ -349,6 +350,24 @@ async def _run_job(dep_id: str, coro_factory) -> None:
     bus.publish()
 
 
+_FINGERPRINT_RE = re.compile(r"^SHA256:[A-Za-z0-9+/]{20,64}={0,2}$")
+
+
+async def _deploy_and_remember(params, worker_name: str, on_line) -> int:
+    """Install the agent; on success remember the server's SSH key fingerprint (trust on first
+    use) so a later teardown talks to the same machine."""
+    code = await deployer.deploy(params, on_line)
+    if code == 0 and params.seen_fingerprint:
+        async with get_sessionmaker()() as session:
+            await session.execute(
+                AgentDeployment.__table__.update()
+                .where(AgentDeployment.worker_name == worker_name)
+                .values(host_key_fp=params.seen_fingerprint)
+            )
+            await session.commit()
+    return code
+
+
 def _agent_port(agent_url: str) -> int:
     try:
         return urlparse(agent_url).port or 8100
@@ -368,6 +387,7 @@ async def server_deploy(
     threads: int = Form(8),
     storage_path: str = Form(_DEFAULT_STORAGE),
     agent_url: str = Form(""),
+    host_fingerprint: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
     worker_name = worker_name.strip()
@@ -393,6 +413,9 @@ async def server_deploy(
         errors.append("потоки: от 1 до 512")
     if not ssh_host or not (ssh_key.strip() or ssh_password):
         errors.append("укажите хост и пароль или SSH-ключ")
+    host_fingerprint = host_fingerprint.strip()
+    if host_fingerprint and not _FINGERPRINT_RE.match(host_fingerprint):
+        errors.append("отпечаток ключа сервера: ожидается вид SHA256:…")
     if errors:
         return RedirectResponse(f"/servers?error={quote('; '.join(errors))}", status_code=303)
 
@@ -411,6 +434,7 @@ async def server_deploy(
     params = deployer.DeployParams(
         ssh_host=ssh_host, ssh_port=ssh_port, ssh_user=ssh_user.strip(),
         ssh_key=ssh_key, ssh_password=ssh_password, env=env,
+        expected_fingerprint=host_fingerprint,
     )
     session.add(AgentDeployment(
         worker_name=worker_name, ssh_host=ssh_host.strip(), ssh_port=ssh_port,
@@ -420,7 +444,7 @@ async def server_deploy(
     await session.commit()
 
     dep = deployments.new_deployment("deploy", worker_name)
-    asyncio.create_task(_run_job(dep.id, lambda on_line: deployer.deploy(params, on_line)))
+    asyncio.create_task(_run_job(dep.id, lambda on_line: _deploy_and_remember(params, worker_name, on_line)))
     return RedirectResponse(f"/servers/deploy/{dep.id}", status_code=303)
 
 
@@ -540,6 +564,7 @@ async def server_teardown(
         ssh_key=ssh_key,
         ssh_password=ssh_password,
         env=env,
+        expected_fingerprint=dep_row.host_key_fp or "",
     )
     dep = deployments.new_deployment("teardown", worker.name)
     asyncio.create_task(_run_teardown(dep.id, params, worker.id, worker.name))
@@ -615,6 +640,7 @@ async def server_remove(
             "SERVICE_NAME": dep_row.service_name,
             "VIDHIVE_STORAGE_PATH": dep_row.storage_path,
         },
+        expected_fingerprint=dep_row.host_key_fp or "",
     )
     if transfer:
         drain.hold(worker.id)  # the task below wipes the machine; the sweeper must not purge first
@@ -1136,13 +1162,19 @@ async def _active_job_rows(session: AsyncSession) -> list[dict]:
 
 
 async def _failed_item_count(session: AsyncSession) -> int:
-    return (
+    items = (
         await session.execute(
             select(func.count()).select_from(Item).where(
                 Item.status.in_(("failed", "rate_limited", "retry_wait"))
             )
         )
     ).scalar_one()
+    blocks = (
+        await session.execute(
+            select(func.count()).select_from(RangeChunk).where(RangeChunk.status == "failed")
+        )
+    ).scalar_one()
+    return items + blocks
 
 
 @router.get("/fragments/jobs", response_class=HTMLResponse,
@@ -1152,17 +1184,31 @@ async def jobs_fragment(request: Request, session: AsyncSession = Depends(get_se
 
 
 async def _error_jobs(session: AsyncSession) -> list[dict]:
-    """Jobs that have retryable errors, with how many (for the retry dropdown)."""
-    rows = (
+    """Jobs that have retryable errors (failed items and failed blocks), for the retry dropdown."""
+    counts: dict[int, int] = {}
+    for jid, n in (
         await session.execute(
-            select(Job.id, Job.name, func.count(Item.id))
-            .join(Item, Item.job_id == Job.id)
+            select(Item.job_id, func.count(Item.id))
             .where(Item.status.in_(("failed", "rate_limited", "retry_wait")))
-            .group_by(Job.id, Job.name)
-            .order_by(Job.id.desc())
+            .group_by(Item.job_id)
         )
-    ).all()
-    return [{"id": jid, "name": name, "count": n} for jid, name, n in rows]
+    ).all():
+        counts[jid] = counts.get(jid, 0) + n
+    for jid, n in (
+        await session.execute(
+            select(RangeChunk.job_id, func.count(RangeChunk.id))
+            .where(RangeChunk.status == "failed")
+            .group_by(RangeChunk.job_id)
+        )
+    ).all():
+        counts[jid] = counts.get(jid, 0) + n
+    if not counts:
+        return []
+    names = {
+        jid: name
+        for jid, name in (await session.execute(select(Job.id, Job.name).where(Job.id.in_(counts)))).all()
+    }
+    return [{"id": jid, "name": names.get(jid), "count": n} for jid, n in sorted(counts.items(), reverse=True)]
 
 
 async def _all_jobs_brief(session: AsyncSession) -> list[dict]:

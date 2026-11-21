@@ -29,7 +29,11 @@ class Settings(BaseSettings):
     # Lease window with ~4 heartbeats inside it: a dead agent's block returns to
     # the queue quickly, while a live one never loses its lease.
     lease_seconds: int = 60
-    poll_interval: float = 1.0          # wait between lease attempts when idle
+    poll_interval: float = 1.0          # first wait between lease attempts when idle
+    poll_max_interval: float = 6.0      # idle polling backs off up to this (less load on the coordinator)
+    # Results of finished videos are reported at least this often, so one long download does not
+    # hold back the others of its batch.
+    partial_report_seconds: float = 20.0
     # Metrics must reach the UI at least once per 5 seconds (spec 18).
     heartbeat_interval: float = 5.0
     check_timeout: float = 20.0

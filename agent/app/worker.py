@@ -95,6 +95,7 @@ class WorkerRunner:
     # -- loops -------------------------------------------------------------- #
     async def _lease_loop(self) -> None:
         assert self.worker_id is not None
+        wait = self.settings.poll_interval
         while not self._stop.is_set():
             try:
                 chunk = await self.client.lease(self.worker_id, self.settings.lease_seconds)
@@ -104,9 +105,12 @@ class WorkerRunner:
                 continue
 
             if chunk is None:
-                await self._sleep(self.settings.poll_interval)
+                # No work: ask less and less often (1 s, 1.6 s, 2.6 s ... up to poll_max_interval).
+                await self._sleep(wait)
+                wait = min(wait * 1.6, self.settings.poll_max_interval)
                 continue
 
+            wait = self.settings.poll_interval
             await self.process_chunk(chunk)
 
     def _collect_metrics(self) -> Heartbeat:
@@ -171,23 +175,44 @@ class WorkerRunner:
         cur = start
         while cur <= end and not self._stop.is_set():
             batch_end = min(cur + batch, end + 1)  # exclusive
-            ids = range(cur, batch_end)
-            results = await asyncio.gather(
-                *(self._handle_id(i, chunk.target_template) for i in ids)
-            )
+            tasks = [
+                asyncio.ensure_future(self._safe_handle(i, chunk.target_template))
+                for i in range(cur, batch_end)
+            ]
+            reported: set[asyncio.Future] = set()
+            pending = set(tasks)
             try:
-                proceed = await self.client.progress(
-                    self.worker_id,
-                    ProgressReport(chunk_id=chunk.chunk_id, next_id=batch_end, items=results),
-                )
-            except Exception as exc:  # noqa: BLE001
-                # Includes 409 (lease lost: another agent owns the chunk now) — either
-                # way stop; the chunk returns to the queue and is handled elsewhere.
-                log.warning("progress report failed: %s", exc)
-                return
-            if proceed is False:      # explicit stop signal only
-                log.info("chunk %s: job paused/stopped — stopping after this batch", chunk.chunk_id)
-                return  # the coordinator already released the chunk with its checkpoint
+                while pending:
+                    # Wait for the whole batch, but report what is finished at least every
+                    # partial_report_seconds: one slow download must not hold back the rest.
+                    _, pending = await asyncio.wait(
+                        pending, timeout=self.settings.partial_report_seconds
+                    )
+                    ready = [t for t in tasks if t.done() and t not in reported]
+                    if not ready:
+                        continue
+                    reported.update(ready)
+                    # The checkpoint moves only when the whole batch is done; earlier reports
+                    # just record items (the coordinator stores them idempotently).
+                    next_id = batch_end if not pending else cur
+                    try:
+                        proceed = await self.client.progress(
+                            self.worker_id,
+                            ProgressReport(chunk_id=chunk.chunk_id, next_id=next_id,
+                                           items=[t.result() for t in ready]),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # Includes 409 (lease lost: another agent owns the chunk now) — either
+                        # way stop; the chunk returns to the queue and is handled elsewhere.
+                        log.warning("progress report failed: %s", exc)
+                        return
+                    if proceed is False:      # explicit stop signal only
+                        log.info("chunk %s: job paused/stopped — stopping", chunk.chunk_id)
+                        return  # the coordinator already released the chunk with its checkpoint
+            finally:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
             cur = batch_end
 
         if not self._stop.is_set():
@@ -196,6 +221,17 @@ class WorkerRunner:
                 log.info("chunk %s: complete", chunk.chunk_id)
             except Exception as exc:  # noqa: BLE001
                 log.warning("complete failed: %s", exc)
+
+    async def _safe_handle(self, external_id: int, template: str | None = None) -> ItemResult:
+        """_handle_id that never raises: an unexpected error becomes a failed item, so one bad
+        identifier cannot take the whole chunk (or the agent's loop) down."""
+        try:
+            return await self._handle_id(external_id, template)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("id %s failed unexpectedly: %s", external_id, exc)
+            return ItemResult(external_id=external_id, status=ItemStatus.FAILED, error=str(exc)[:200])
 
     async def _handle_id(self, external_id: int, template: str | None = None) -> ItemResult:
         async with self._sem:

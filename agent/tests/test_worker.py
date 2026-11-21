@@ -132,3 +132,73 @@ def test_an_old_coordinator_without_the_field_keeps_going():
     runner.worker_id = 1
     asyncio.run(runner.process_chunk(_lease()))
     assert [r.next_id for r in client.progress_calls] == [3, 6, 9] and client.completed == [11]
+
+
+
+def test_finished_videos_are_reported_before_a_slow_one_completes():
+    """One long download must not hold back the results of the others in its batch."""
+    class SlowChecker(FakeChecker):
+        async def check(self, external_id, template=None):
+            if external_id == 2:
+                await asyncio.sleep(0.5)                     # the slow one
+            return await super().check(external_id, template)
+
+    settings = Settings(progress_batch=3, threads=4, enable_download=False, partial_report_seconds=0.1)
+    client, checker = FakeClient(), SlowChecker()
+    runner = WorkerRunner(settings, client, checker)
+    runner.worker_id = 1
+    lease = ChunkLease(chunk_id=9, job_id=1, range_start=0, range_end=2, next_id=0,
+                       lease_expires_at=datetime.now(timezone.utc))
+    asyncio.run(runner.process_chunk(lease))
+
+    sizes = [(r.next_id, sorted(i.external_id for i in r.items)) for r in client.progress_calls]
+    assert sizes[0] == (0, [0, 1])            # the quick ones first, checkpoint not moved yet
+    assert sizes[-1] == (3, [2])              # then the slow one, and the checkpoint advances
+    assert client.completed == [9]
+
+
+def test_an_unexpected_error_in_one_id_becomes_a_failed_item_not_a_crash():
+    class Boom(FakeChecker):
+        async def check(self, external_id, template=None):
+            if external_id == 1:
+                raise RuntimeError("unexpected")
+            return await super().check(external_id, template)
+
+    client = FakeClient()
+    runner = WorkerRunner(Settings(progress_batch=3, threads=4, enable_download=False), client, Boom())
+    runner.worker_id = 1
+    lease = ChunkLease(chunk_id=10, job_id=1, range_start=0, range_end=2, next_id=0,
+                       lease_expires_at=datetime.now(timezone.utc))
+    asyncio.run(runner.process_chunk(lease))
+    items = {i.external_id: i.status for r in client.progress_calls for i in r.items}
+    assert items[1] == ItemStatus.FAILED and len(items) == 3 and client.completed == [10]
+
+
+def test_idle_polling_backs_off_and_resets_when_work_appears():
+    waits = []
+
+    class IdleClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.n = 0
+
+        async def lease(self, worker_id, lease_seconds):
+            self.n += 1
+            if self.n == 5:
+                return ChunkLease(chunk_id=11, job_id=1, range_start=0, range_end=0, next_id=0,
+                                  lease_expires_at=datetime.now(timezone.utc))
+            if self.n > 6:
+                runner.stop()
+            return None
+
+    runner = WorkerRunner(Settings(progress_batch=3, threads=2, enable_download=False,
+                                   poll_interval=1.0, poll_max_interval=3.0), IdleClient(), FakeChecker())
+    runner.worker_id = 1
+
+    async def fake_sleep(seconds):
+        waits.append(round(seconds, 1))
+
+    runner._sleep = fake_sleep
+    asyncio.run(runner._lease_loop())
+    assert waits[:4] == [1.0, 1.6, 2.6, 3.0]          # backs off up to the cap
+    assert waits[4] == 1.0                            # work arrived: the next idle wait starts over

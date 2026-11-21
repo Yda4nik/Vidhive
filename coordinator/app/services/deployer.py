@@ -43,6 +43,18 @@ class DeployParams:
     ssh_key: str = ""  # PEM private key text — used once, never stored
     ssh_password: str = ""  # SSH password (VPS case) — used once, never stored
     env: dict[str, str] = field(default_factory=dict)  # VIDHIVE_* + INSTALL_DIR/etc.
+    # SSH host key check: if set, the server must present exactly this fingerprint
+    # ("SHA256:…"), else nothing is run. The fingerprint actually seen is left in seen_fingerprint.
+    expected_fingerprint: str = ""
+    seen_fingerprint: str = ""
+
+
+def _host_fingerprint(conn) -> str:
+    """'SHA256:…' of the key the server presented ('' if the library cannot tell)."""
+    try:
+        return conn.get_server_host_key().get_fingerprint()
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def build_env_prefix(env: dict[str, str]) -> str:
@@ -63,6 +75,14 @@ async def run_script(params: DeployParams, script_text: str, on_line: OnLine) ->
     else:
         connect_kwargs["client_keys"] = [asyncssh.import_private_key(params.ssh_key)]
     async with asyncssh.connect(params.ssh_host, **connect_kwargs) as conn:
+        fp = _host_fingerprint(conn)
+        params.seen_fingerprint = fp
+        if fp:
+            on_line(f"Отпечаток SSH-ключа сервера: {fp}")
+        if params.expected_fingerprint and fp != params.expected_fingerprint:
+            on_line("ОШИБКА: отпечаток ключа сервера не совпадает с ожидаемым. Подключение остановлено: "
+                    "возможна подмена сервера. Ничего не выполнено.")
+            return 255
         proc = await conn.create_process(command, stdin=asyncssh.PIPE, stderr=asyncssh.STDOUT)
         proc.stdin.write(script_text)
         proc.stdin.write_eof()

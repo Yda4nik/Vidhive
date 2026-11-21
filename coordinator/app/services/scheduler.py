@@ -164,7 +164,29 @@ async def reclaim_expired(session: AsyncSession) -> int:
             result="requeued",
             message=f"{count} chunk(s) returned to the queue after lease expiry",
         )
+        await _park_poison_chunks(session)
     return count
+
+
+async def _park_poison_chunks(session: AsyncSession) -> int:
+    """Chunks that already expired/failed too many times stop cycling: they become FAILED."""
+    parked = await session.execute(
+        update(RangeChunk)
+        .where(RangeChunk.status == ChunkStatus.PENDING.value)
+        .where(RangeChunk.attempt >= get_settings().max_chunk_attempts)
+        .values(status=ChunkStatus.FAILED.value, leased_by=None, lease_expires_at=None)
+    )
+    n = parked.rowcount or 0
+    if n:
+        log_event(
+            session,
+            component="scheduler",
+            operation="park",
+            level="error",
+            result="failed",
+            message=f"{n} chunk(s) failed {get_settings().max_chunk_attempts} times and were set aside",
+        )
+    return n
 
 
 async def mark_stale_workers(session: AsyncSession, offline_after_seconds: int) -> int:
@@ -268,7 +290,6 @@ async def lease_chunk(
     """Lease the next available chunk to ``worker``, generating one if needed."""
     if worker.state == "draining":
         return None  # being emptied: it keeps serving files but takes no new work
-    await reclaim_expired(session)
 
     if not await _worker_has_space(session, worker):
         log_event(
@@ -283,6 +304,9 @@ async def lease_chunk(
         return None
 
     chunk = await _take_pending_chunk(session, worker)
+    if chunk is None and await reclaim_expired(session):
+        # Nothing was queued: only now look for expired leases (cheaper than on every poll).
+        chunk = await _take_pending_chunk(session, worker)
     if chunk is None:
         chunk = await _generate_chunk(session, worker)
     if chunk is None:
@@ -503,11 +527,15 @@ async def complete_chunk(
         chunk.leased_by = None
         chunk.lease_expires_at = None
     else:
-        # Failure: back to the queue so another worker can retry.
-        chunk.status = ChunkStatus.PENDING.value
+        # Failure: back to the queue so another worker can retry — until it has failed too often.
+        chunk.attempt += 1
+        chunk.status = (
+            ChunkStatus.FAILED.value
+            if chunk.attempt >= get_settings().max_chunk_attempts
+            else ChunkStatus.PENDING.value
+        )
         chunk.leased_by = None
         chunk.lease_expires_at = None
-        chunk.attempt += 1
     await session.flush()
     return chunk
 
@@ -538,7 +566,20 @@ async def requeue_failed_items(session: AsyncSession, job_id: int, limit: int = 
             .limit(limit)
         )
     ).scalars().all()
-    if not items:
+    # Blocks that were set aside after too many failures get a fresh start too.
+    failed_chunks = (
+        await session.execute(
+            select(RangeChunk)
+            .where(RangeChunk.job_id == job_id)
+            .where(RangeChunk.status == ChunkStatus.FAILED.value)
+        )
+    ).scalars().all()
+    for c in failed_chunks:
+        c.status = ChunkStatus.PENDING.value
+        c.attempt = 0
+        c.leased_by = None
+        c.lease_expires_at = None
+    if not items and not failed_chunks:
         return 0
 
     # Single-id chunks that already exist from an earlier retry.
@@ -570,7 +611,7 @@ async def requeue_failed_items(session: AsyncSession, job_id: int, limit: int = 
             chunk.leased_by = None
             chunk.lease_expires_at = None
             chunk.next_id = item.external_id
-            chunk.attempt += 1
+            chunk.attempt = 0          # a manual retry is a fresh start
         item.status = ItemStatus.PENDING.value
 
     # A *finished* job must go back to running, or nothing would be handed out. A
@@ -585,10 +626,10 @@ async def requeue_failed_items(session: AsyncSession, job_id: int, limit: int = 
         operation="retry",
         result="requeued",
         job_id=job_id,
-        message=f"{len(items)} failed identifier(s) re-queued",
+        message=f"{len(items)} failed identifier(s) and {len(failed_chunks)} block(s) re-queued",
     )
     await session.flush()
-    return len(items)
+    return len(items) + len(failed_chunks)
 
 
 async def maybe_complete_job(session: AsyncSession, job_id: int) -> bool:
@@ -632,6 +673,14 @@ async def maybe_complete_job(session: AsyncSession, job_id: int) -> bool:
     if open_chunks is not None:
         return False
 
-    job.state = JobState.COMPLETED.value
+    any_failed = (
+        await session.execute(
+            select(RangeChunk.id)
+            .where(RangeChunk.job_id == job_id)
+            .where(RangeChunk.status == ChunkStatus.FAILED.value)
+            .limit(1)
+        )
+    ).first()
+    job.state = JobState.FAILED.value if any_failed else JobState.COMPLETED.value
     await session.flush()
     return True

@@ -98,6 +98,8 @@ VIDHIVE_STORAGE_PATH=${VIDHIVE_STORAGE_PATH:-/var/lib/vidhive/videos}
 VIDHIVE_AGENT_TOKEN=${VIDHIVE_AGENT_TOKEN:-}
 VIDHIVE_TARGET_TEMPLATE=${VIDHIVE_TARGET_TEMPLATE:-http://kinescope.io/{id}}
 EOF
+# The file holds the shared agent token: only root may read it.
+$SUDO chmod 600 "${ENV_FILE}"
 
 START_CMD="${INSTALL_DIR}/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${AGENT_PORT}"
 

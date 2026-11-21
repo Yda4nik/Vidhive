@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     default_chunk_size: int = 5000
     default_lease_seconds: int = 120
 
+    # A block that expired or failed this many times is parked as FAILED instead of cycling
+    # forever (a "poison" block); "retry errors" gives it a fresh start.
+    max_chunk_attempts: int = 5
+
     # Stop issuing blocks to a worker that is running out of disk (spec 6.3).
     min_free_space_gb: float = 5.0
 

@@ -117,6 +117,10 @@ async def _completion_sweeper() -> None:
                     if await scheduler.maybe_complete_job(session, jid):
                         changed = True
 
+                # Leases that expired while every agent was busy still go back to the queue.
+                if await scheduler.reclaim_expired(session):
+                    changed = True
+
                 # Agents that stopped heartbeating are no longer "online".
                 if await scheduler.mark_stale_workers(
                     session, get_settings().worker_offline_seconds
